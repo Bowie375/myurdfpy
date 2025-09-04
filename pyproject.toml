@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "myurdfpy"
+version = "0.1.0"
+description = "A URDF parser"
+authors = [
+    { name = "Bowie375", email = "2200013174@stu.pku.edu.cn" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+
+dependencies = [
+    "trimesh",
+    "viser",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"] 
