@@ -1,77 +1,14 @@
-"""
-Script for visualizing a robot from a URDF.
-"""
-
 import sys
 import time
 import logging
-import argparse
-from functools import partial
 
 import viser
-import trimesh.transformations as tra
 import numpy as np
+import trimesh.transformations as tra
 
-from myurdfpy import __version__
 from myurdfpy import URDF
 
 _logger = logging.getLogger(__name__)
-
-
-def parse_args(args):
-    """Parse command line parameters
-
-    Args:
-      args (List[str]): command line parameters as list of strings
-          (for example  ``["--help"]``).
-
-    Returns:
-      :obj:`argparse.Namespace`: command line parameters namespace
-    """
-    parser = argparse.ArgumentParser(description="Visualize a URDF model.")
-    parser.add_argument(
-        "--version",
-        action="version",
-        version="yourdfpy {ver}".format(ver=__version__),
-    )
-    parser.add_argument(
-        "input",
-        help="URDF file name.",
-    )
-    parser.add_argument(
-        "-c",
-        "--configuration",
-        nargs="+",
-        type=float,
-        help="Configuration of the visualized URDF model.",
-    )
-    parser.add_argument(
-        "--collision",
-        action="store_true",
-        help="Use collision geometry for the visualized URDF model.",
-    )
-    parser.add_argument(
-        "--animate",
-        action="store_true",
-        help="Animate model by interpolating through all actuated joint limits.",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        dest="loglevel",
-        help="set loglevel to INFO",
-        action="store_const",
-        const=logging.INFO,
-    )
-    parser.add_argument(
-        "-vv",
-        "--very-verbose",
-        dest="loglevel",
-        help="set loglevel to DEBUG",
-        action="store_const",
-        const=logging.DEBUG,
-    )
-    return parser.parse_args(args)
 
 
 def setup_logging(loglevel):
@@ -150,78 +87,98 @@ def viewer_callback(scene, urdf_model, trajectory, loop_time):
 
     urdf_model.update_cfg(configuration=cfg)
 
+         
+class Visualizer:
+    def __init__(
+        self, 
+        urdf_file: str, 
+        skip_materials: bool = False,
+        use_collision_mesh: bool = False
+    ):
+        self._urdf_model = URDF.load(urdf_file, skip_materials=skip_materials)
+        self._server = viser.ViserServer()
+        self._use_collision_mesh = use_collision_mesh
 
-def main(args):
-    """Wrapper allowing string arguments in a CLI fashion.
+        self._mesh_handles = {}
+        self._frame_handles = {}
 
-    Args:
-      args (List[str]): command line parameters as list of strings
-          (for example  ``["--verbose", "42"]``).
-    """
-    args = parse_args(args)
-    setup_logging(args.loglevel)
+        self._mesh_colors = {}
+        self._highlighted_handle = None
 
-    if args.collision:
-        urdf_model = URDF.load(
-            args.input, build_collision_scene_graph=True, load_collision_meshes=True
-        )
-    else:
-        urdf_model = URDF.load(args.input)
+    def _add_mesh(self):
+        scene = self._urdf_model.collision_scene if self._use_collision_mesh else self._urdf_model.scene
 
-    if args.configuration:
-        urdf_model.update_cfg(args.configuration)
+        with self._server.gui.add_folder("Meshs"):
+            # Add all meshes from the scene
+            for i, geometry_name in enumerate(scene.geometry):
+                with self._server.gui.add_folder(f"{i}"):
+                    mesh = scene.geometry[geometry_name]
+                    transform = scene.graph.get(geometry_name)[0]
 
-    callback = None
-    if args.animate:
-        loop_time = 6.0
-        callback = partial(
-            viewer_callback,
-            urdf_model=urdf_model,
-            loop_time=loop_time,
-            trajectory=generate_joint_limit_trajectory(
-                urdf_model=urdf_model, loop_time=loop_time
-            ),
-        )
+                    handle = self._server.scene.add_mesh_trimesh(
+                        name=f"mesh_{i}",
+                        mesh=mesh,
+                        wxyz=tra.quaternion_from_matrix(transform),
+                        position=transform[:3, 3],
+                    )
+                    self._mesh_handles[geometry_name] = handle
 
-    #urdf_model.show(
-    #    collision_geometry=args.collision,
-    #    callback=callback,
-    #)
+                    handle = self._server.scene.add_frame(
+                        name=f"frame_{i}",
+                        axes_length=0.1,
+                        wxyz=tra.quaternion_from_matrix(transform),
+                        position=transform[:3, 3],
+                        visible=False
+                    )
+                    self._frame_handles[geometry_name] = handle
 
+    def _add_joint_control(self):
+        with self._server.gui.add_folder("Controls"):
+            for joint_name in self._urdf_model.actuated_joint_names:
+                joint = self._urdf_model.joint_map[joint_name]
 
-    # 2. Start viser server
-    server = viser.ViserServer()
-    scene = urdf_model._scene
+                slider = self._server.gui.add_slider(
+                    joint_name,
+                    min=joint.limit.lower,
+                    max=joint.limit.upper,
+                    step=0.01,
+                    initial_value=0.,
+                )
 
-    # 3. Add all meshes from the scene
-    for i, geometry_name in enumerate(scene.geometry):
-        mesh = scene.geometry[geometry_name]
+                def make_callback(joint_name):
+                    def callback(e: viser.GuiEvent):
+                        self._urdf_model.update_cfg({joint_name: e.target.value})
+                        scene = (
+                            self._urdf_model.collision_scene
+                            if self._use_collision_mesh
+                            else self._urdf_model.scene
+                        )
+                        for geometry_name, handle in self._mesh_handles.items():
+                            transform = scene.graph.get(geometry_name)[0]
+                            handle.wxyz = tra.quaternion_from_matrix(transform)
+                            handle.position = transform[:3, 3]
+                            frame_handle = self._frame_handles[geometry_name]
+                            frame_handle.wxyz = tra.quaternion_from_matrix(transform)
+                            frame_handle.position = transform[:3, 3]
 
-        # Extract transform: trimesh stores each mesh's pose in scene.graph
-        transform = scene.graph.get(geometry_name)[0]  # (4x4 matrix)
+                    return callback
 
-        server.scene.add_mesh_trimesh(
-            name=f"mesh_{i}",
-            mesh=mesh,
-            wxyz=tra.quaternion_from_matrix(transform),
-            position=transform[:3, 3],
-        )
+                slider.on_update(make_callback(joint_name))
 
-    print("Open http://localhost:8080 in your browser to see the scene.")
+    def _add_link_click(self):
+        for geometry_name, handle in enumerate(self._mesh_handles.items()):
+            
+            @handle.on_click
+            def callback(event: viser.SceneNodePointerEvent):
+                handle.mesh.visual.face_colors[:] = [1.0, 0.0, 0.0, 1.0]
+                self._frame_handles[geometry_name].visible = True
+            return callback
 
-    # Keep the server alive
-    import time
-    while True:
-        time.sleep(1)
-
-
-def run():
-    """Calls :func:`main` passing the CLI arguments extracted from :obj:`sys.argv`.
-
-    This function can be used as entry point to create console scripts with setuptools.
-    """
-    main(sys.argv[1:])
+    def run(self):
+        self._add_mesh()
+        self._add_joint_control()
+        #self._add_link_click()
 
 
 if __name__ == "__main__":
-    run()
+    pass

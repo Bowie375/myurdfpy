@@ -1,0 +1,35 @@
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: true
+  job_logging:
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        level: WARN
+        stream: ext://sys.stdout
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        level: INFO
+        filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log
+      file_debug:
+        class: logging.FileHandler
+        formatter: simple
+        level: DEBUG
+        filename: ${hydra.runtime.output_dir}/${hydra.job.name}_debug.log
+    root:
+      level: INFO
+      handlers:
+      - console
+      - file
+      - file_debug
+
+disable_loggers: []
+
+visualize:
+  urdf_file: null
+  skip_materials: false
+  use_collision_mesh: false
