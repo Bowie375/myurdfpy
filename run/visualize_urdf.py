@@ -18,9 +18,9 @@ def main(cfg: omegaconf.DictConfig):
         logging.getLogger(logger_name).disabled = True
     _logger.info(f"pid:{os.getpid()}")
 
-    dump_cfg(".hydra/visualize_robot.yaml", cfg.visualize)
+    dump_cfg(".hydra/visualize_robot.yaml", cfg)
 
-    viz = Visualizer(**cfg.visualize)
+    viz = Visualizer(**cfg.urdf, **cfg.visualize)
     viz.run()
 
     # Keep the server alive

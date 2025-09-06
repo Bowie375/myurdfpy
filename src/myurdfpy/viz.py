@@ -12,16 +12,19 @@ class Visualizer:
     def __init__(
         self, 
         urdf_file: str, 
+        mesh_dir: str = "",
+        filename_handler: callable = None,
         skip_materials: bool = False,
         use_collision_mesh: bool = False
     ):
-        self._urdf_model = URDF.load(urdf_file, skip_materials=skip_materials)
+        self._urdf_model = URDF.load(
+            urdf_file, mesh_dir=mesh_dir, filename_handler=filename_handler, skip_materials=skip_materials)
         self._server = viser.ViserServer()
         self._use_collision_mesh = use_collision_mesh
 
         self._mesh_handles: dict[str, viser.MeshHandle] = {}
         self._frame_handles: dict[str, viser.FrameHandle] = {}
-        self._slider_handles: dict[str, viser.SliderHandle] = {}
+        self._slider_handles: dict[str, viser.GuiSliderHandle] = {}
 
     def _add_mesh(self):
         scene = self._urdf_model.collision_scene if self._use_collision_mesh else self._urdf_model.scene
@@ -88,7 +91,7 @@ class Visualizer:
                     min=joint.limit.lower,
                     max=joint.limit.upper,
                     step=0.01,
-                    initial_value=0.,
+                    initial_value=max(joint.limit.lower, min(joint.limit.upper, 0.))
                 )
                 self._slider_handles[joint_name] = slider
 

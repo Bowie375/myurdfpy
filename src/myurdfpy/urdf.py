@@ -1,6 +1,7 @@
 import os
 import copy
 import logging
+from functools import partial
 from dataclasses import dataclass, field, is_dataclass
 from typing import Dict, List, Optional, Union
 
@@ -10,7 +11,7 @@ import trimesh
 import trimesh.transformations as tra
 from lxml import etree
 
-from myurdfpy.utils import str2float, array_eq, scalar_eq
+from myurdfpy.utils import str2float, array_eq, scalar_eq, filename_handler_magic
 
 _logger = logging.getLogger(__name__)
 
@@ -390,6 +391,7 @@ class URDF:
         build_scene_graph: bool = True,
         build_collision_scene_graph: bool = True,
         mesh_dir: str = "",
+        filename_handler: callable = None,
         load_meshes: bool = True,
         load_collision_meshes: bool = True,
         force_mesh: bool = False,
@@ -402,14 +404,18 @@ class URDF:
             robot (Robot): The robot model. Defaults to None.
             build_scene_graph (bool, optional): Whether to build a scene graph to enable transformation queries and forward kinematics. Defaults to True.
             build_collision_scene_graph (bool, optional): Whether to build a scene graph for <collision> elements. Defaults to True.
-            mesh_dir (str, optional): Directory where to look for meshes. Defaults to "".
+            mesh_dir (str, optional): Directory where to look for meshes. Defaults to None.
+            filename_handler (callable, optional): A function that takes a file name and returns a valid file path. This can be used to modify the file names of <mesh> elements. If None, a default handler that makes the file names relative to mesh_dir is used. Defaults to None.
             load_meshes (bool, optional): Whether to load the meshes referenced in the <mesh> elements. Defaults to True.
             load_collision_meshes (bool, optional): Whether to load the collision meshes referenced in the <mesh> elements. Defaults to False.
             force_mesh (bool, optional): Each loaded geometry will be concatenated into a single one (instead of being turned into a graph; in case the underlying file contains multiple geometries). This might loose texture information but the resulting scene graph will be smaller. Defaults to True.
             force_collision_mesh (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
             skip_materials (bool, optional): Materials will not be loaded. Defaults to False.
         """
-        self._filename_handler = lambda n: os.path.join(mesh_dir, n)
+        if filename_handler is None:
+            self._filename_handler = partial(filename_handler_magic, dir=mesh_dir)
+        else:
+            self._filename_handler = filename_handler
 
         self.robot = robot
         self._create_maps()
@@ -524,8 +530,9 @@ class URDF:
             fname_or_file (str or file object): A filename or file object, file-like object, stream representing the URDF file.
             **build_scene_graph (bool, optional): Whether to build a scene graph to enable transformation queries and forward kinematics. Defaults to True.
             **build_collision_scene_graph (bool, optional): Whether to build a scene graph for <collision> elements. Defaults to False.
-            **mesh_dir (str, optional): Directory where to look for meshes. Defaults to "".
+            **mesh_dir (str, optional): Directory where to look for meshes. Defaults to None.
             **load_meshes (bool, optional): Whether to load the meshes referenced in the <mesh> elements. Defaults to True.
+            **filename_handler (callable, optional): A function that takes a file name and returns a valid file path. This can be used to modify the file names of <mesh> elements. If None, a default handler that makes the file names relative to mesh_dir is used. Defaults to None.
             **load_collision_meshes (bool, optional): Whether to load the collision meshes referenced in the <mesh> elements. Defaults to False.
             **force_mesh (bool, optional): Each loaded geometry will be concatenated into a single one (instead of being turned into a graph; in case the underlying file contains multiple geometries). This might loose texture information but the resulting scene graph will be smaller. Defaults to False.
             **force_collision_mesh (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
@@ -540,7 +547,7 @@ class URDF:
             if not os.path.isfile(fname_or_file):
                 raise ValueError("{} is not a file".format(fname_or_file))
 
-            if "mesh_dir" not in kwargs:
+            if kwargs.get("mesh_dir", None) is None:
                 kwargs["mesh_dir"] = os.path.dirname(fname_or_file)
 
         try:
