@@ -16,10 +16,12 @@ requires-python = ">=3.8"
 dependencies = [
     "trimesh",
     "viser",
-    "numpy == 1.26.4",
-    "scipy == 1.11.4",
-    "sympy == 1.13.1",
+    "numpy==1.26.4",
+    "scipy==1.11.4",
+    "sympy==1.13.1",
     "pybullet",
+    "hydra-core",
+    "pydantic",
 ]
 
 [tool.setuptools.packages.find]
