@@ -158,6 +158,17 @@ class URDF:
             if link.isjoint:
                 self._joint_map[link.name] = link
 
+    def _update_actuated_joints(self):
+        self._actuated_joints: list[rtb.Link] = []
+        self._actuated_dof_indices: list[list[int]] = []
+
+        dof_indices_cnt = 0
+        for j in [link for link in self.robot.links if link.isjoint]:
+            self._actuated_joints.append(j)
+
+            self._actuated_dof_indices.append([dof_indices_cnt])
+            dof_indices_cnt += 1
+
     ###############################################################
     # The following method is the main entry point for this class #
     ###############################################################
@@ -297,7 +308,7 @@ class URDF:
         Returns:
             list[Joint]: List of actuated joints of the URDF model.
         """
-        return self._actuated_joints
+        return self.actuated_joints
 
     @property
     def actuated_dof_indices(self):
@@ -308,14 +319,14 @@ class URDF:
         """
         return self._actuated_dof_indices
 
-    @property
-    def actuated_joint_indices(self):
-        """List of indices of all joints that are actuated, i.e., not of type mimic or fixed.
+    #@property
+    #def actuated_joint_indices(self):
+    #    """List of indices of all joints that are actuated, i.e., not of type mimic or fixed.
 
-        Returns:
-            list[int]: List of indices of actuated joints.
-        """
-        return self._actuated_joint_indices
+    #    Returns:
+    #        list[int]: List of indices of actuated joints.
+    #    """
+    #    return self._actuated_joint_indices
 
     @property
     def actuated_joint_names(self):
@@ -364,25 +375,13 @@ class URDF:
         config = []
         config_names = []
         for j in self._actuated_joints:
-            if j.type == "revolute" or j.type == "prismatic":
-                if j.limit is not None:
-                    cfg = [j.limit.lower + 0.5 * (j.limit.upper - j.limit.lower)]
-                else:
-                    cfg = [0.0]
-            elif j.type == "continuous":
+            if j.qlim is not None:
+                cfg = [j.qlim[0] + 0.5 * (j.qlim[1] - j.qlim[0])]
+            else:
                 cfg = [0.0]
-            elif j.type == "floating":
-                cfg = [0.0] * 6
-            elif j.type == "planar":
-                cfg = [0.0] * 2
 
             config.append(cfg)
             config_names.append(j.name)
-
-        for i, j in enumerate(self.robot.joints):
-            if j.mimic is not None:
-                index = config_names.index(j.mimic.joint)
-                config[i][0] = config[index][0] * j.mimic.multiplier + j.mimic.offset
 
         if len(config) == 0:
             return np.array([], dtype=np.float64)
