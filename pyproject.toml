@@ -22,6 +22,7 @@ dependencies = [
     "pybullet",
     "hydra-core",
     "pydantic",
+    "roboticstoolbox-python",
 ]
 
 [tool.setuptools.packages.find]

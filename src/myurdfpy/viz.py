@@ -6,6 +6,7 @@ import trimesh.transformations as tra
 
 from myurdfpy import URDF
 
+
 _logger = logging.getLogger(__name__)
          
 class Visualizer:

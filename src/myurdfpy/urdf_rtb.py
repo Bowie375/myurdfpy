@@ -1,339 +1,25 @@
 import os
 import logging
 from functools import partial
-from dataclasses import dataclass, field, is_dataclass
-from typing import Dict, List, Optional, Union
+from dataclasses import is_dataclass
+from typing import Dict, Union
 
 import six
 import numpy as np
 import trimesh
 import trimesh.transformations as tra
 from lxml import etree
+import spatialgeometry as sg
 import roboticstoolbox as rtb
-from spatialgeometry import geom as sg
+import roboticstoolbox.tools.xacro as rtb_xacro
+from roboticstoolbox.tools import URDF as rtb_URDF
 
-from myurdfpy.utils import str2float, array_eq, scalar_eq, filename_handler_magic
+from myurdfpy.utils import filename_handler_magic
 
 _logger = logging.getLogger(__name__)
 
 # threshold for comparison
 EQUALITY_TOLERANCE = 1e-8
-
-@dataclass(eq=False)
-class TransmissionJoint:
-    name: str
-    hardware_interfaces: List[str] = field(default_factory=list)
-
-    def __eq__(self, other):
-        if not isinstance(other, TransmissionJoint):
-            return NotImplementedError
-        return (
-            self.name == other.name
-            and all(
-                self_hi in other.hardware_interfaces
-                for self_hi in self.hardware_interfaces
-            )
-            and all(
-                other_hi in self.hardware_interfaces
-                for other_hi in other.hardware_interfaces
-            )
-        )
-
-
-@dataclass(eq=False)
-class Actuator:
-    name: str
-    mechanical_reduction: Optional[float] = None
-    # The following is only valid for ROS Indigo and prior versions
-    hardware_interfaces: List[str] = field(default_factory=list)
-
-    def __eq__(self, other):
-        if not isinstance(other, Actuator):
-            return NotImplementedError
-        return (
-            self.name == other.name
-            and scalar_eq(self.mechanical_reduction, other.mechanical_reduction, EQUALITY_TOLERANCE)
-            and all(
-                self_hi in other.hardware_interfaces
-                for self_hi in self.hardware_interfaces
-            )
-            and all(
-                other_hi in self.hardware_interfaces
-                for other_hi in other.hardware_interfaces
-            )
-        )
-
-
-@dataclass(eq=False)
-class Transmission:
-    name: str
-    type: Optional[str] = None
-    joints: List[TransmissionJoint] = field(default_factory=list)
-    actuators: List[Actuator] = field(default_factory=list)
-
-    def __eq__(self, other):
-        if not isinstance(other, Transmission):
-            return NotImplementedError
-        return (
-            self.name == other.name
-            and self.type == other.type
-            and all(self_joint in other.joints for self_joint in self.joints)
-            and all(other_joint in self.joints for other_joint in other.joints)
-            and all(
-                self_actuator in other.actuators for self_actuator in self.actuators
-            )
-            and all(
-                other_actuator in self.actuators for other_actuator in other.actuators
-            )
-        )
-
-
-@dataclass
-class Calibration:
-    rising: Optional[float] = None
-    falling: Optional[float] = None
-
-
-@dataclass
-class Mimic:
-    joint: str
-    multiplier: Optional[float] = None
-    offset: Optional[float] = None
-
-@dataclass
-class SafetyController:
-    soft_lower_limit: Optional[float] = None
-    soft_upper_limit: Optional[float] = None
-    k_position: Optional[float] = None
-    k_velocity: Optional[float] = None
-
-
-@dataclass
-class Sphere:
-    radius: float
-
-
-@dataclass
-class Cylinder:
-    radius: float
-    length: float
-
-
-@dataclass(eq=False)
-class Box:
-    size: np.ndarray
-
-    def __eq__(self, other):
-        if not isinstance(other, Box):
-            return NotImplementedError
-        return array_eq(self.size, other.size, EQUALITY_TOLERANCE)
-
-
-@dataclass(eq=False)
-class Mesh:
-    filename: str
-    scale: Optional[Union[float, np.ndarray]] = None
-
-    def __eq__(self, other):
-        if not isinstance(other, Mesh):
-            return NotImplementedError
-
-        if self.filename != other.filename:
-            return False
-
-        if isinstance(self.scale, float) and isinstance(other.scale, float):
-            return scalar_eq(self.scale, other.scale, EQUALITY_TOLERANCE)
-
-        return array_eq(self.scale, other.scale, EQUALITY_TOLERANCE)
-
-
-@dataclass
-class Geometry:
-    box: Optional[Box] = None
-    cylinder: Optional[Cylinder] = None
-    sphere: Optional[Sphere] = None
-    mesh: Optional[Mesh] = None
-
-
-@dataclass(eq=False)
-class Color:
-    rgba: np.ndarray
-
-    def __eq__(self, other):
-        if not isinstance(other, Color):
-            return NotImplementedError
-        return array_eq(self.rgba, other.rgba, EQUALITY_TOLERANCE)
-
-
-@dataclass
-class Texture:
-    filename: str
-
-
-@dataclass
-class Material:
-    name: Optional[str] = None
-    color: Optional[Color] = None
-    texture: Optional[Texture] = None
-
-
-@dataclass(eq=False)
-class Visual:
-    name: Optional[str] = None
-    origin: Optional[np.ndarray] = None
-    geometry: Optional[Geometry] = None  # That's not really optional according to ROS
-    material: Optional[Material] = None
-
-    def __eq__(self, other):
-        if not isinstance(other, Visual):
-            return NotImplementedError
-        return (
-            self.name == other.name
-            and array_eq(self.origin, other.origin, EQUALITY_TOLERANCE)
-            and self.geometry == other.geometry
-            and self.material == other.material
-        )
-
-
-@dataclass(eq=False)
-class Collision:
-    name: str
-    origin: Optional[np.ndarray] = None
-    geometry: Geometry = None
-
-    def __eq__(self, other):
-        if not isinstance(other, Collision):
-            return NotImplementedError
-        return (
-            self.name == other.name
-            and array_eq(self.origin, other.origin, EQUALITY_TOLERANCE)
-            and self.geometry == other.geometry
-        )
-
-
-@dataclass(eq=False)
-class Inertial:
-    origin: Optional[np.ndarray] = None
-    mass: Optional[float] = None
-    inertia: Optional[np.ndarray] = None
-
-    def __eq__(self, other):
-        if not isinstance(other, Inertial):
-            return NotImplementedError
-        return (
-            array_eq(self.origin, other.origin, EQUALITY_TOLERANCE)
-            and scalar_eq(self.mass, other.mass, EQUALITY_TOLERANCE)
-            and array_eq(self.inertia, other.inertia, EQUALITY_TOLERANCE)
-        )
-
-
-@dataclass(eq=False)
-class Link:
-    name: str
-    inertial: Optional[Inertial] = None
-    visuals: List[Visual] = field(default_factory=list)
-    collisions: List[Collision] = field(default_factory=list)
-
-    def __eq__(self, other):
-        if not isinstance(other, Link):
-            return NotImplementedError
-        return (
-            self.name == other.name
-            and self.inertial == other.inertial
-            and all(self_visual in other.visuals for self_visual in self.visuals)
-            and all(other_visual in self.visuals for other_visual in other.visuals)
-            and all(
-                self_collision in other.collisions for self_collision in self.collisions
-            )
-            and all(
-                other_collision in self.collisions
-                for other_collision in other.collisions
-            )
-        )
-
-
-@dataclass
-class Dynamics:
-    damping: Optional[float] = None
-    friction: Optional[float] = None
-
-
-@dataclass
-class Limit:
-    effort: Optional[float] = None
-    velocity: Optional[float] = None
-    lower: Optional[float] = None
-    upper: Optional[float] = None
-
-
-@dataclass(eq=False)
-class Joint:
-    name: str
-    type: str = None
-    parent: str = None
-    child: str = None
-    origin: np.ndarray = None
-    axis: np.ndarray = None
-    dynamics: Optional[Dynamics] = None
-    limit: Optional[Limit] = None
-    mimic: Optional[Mimic] = None
-    calibration: Optional[Calibration] = None
-    safety_controller: Optional[SafetyController] = None
-
-    def __eq__(self, other):
-        if not isinstance(other, Joint):
-            return NotImplementedError
-        return (
-            self.name == other.name
-            and self.type == other.type
-            and self.parent == other.parent
-            and self.child == other.child
-            and array_eq(self.origin, other.origin, EQUALITY_TOLERANCE)
-            and array_eq(self.axis, other.axis, EQUALITY_TOLERANCE)
-            and self.dynamics == other.dynamics
-            and self.limit == other.limit
-            and self.mimic == other.mimic
-            and self.calibration == other.calibration
-            and self.safety_controller == other.safety_controller
-        )
-
-
-@dataclass(eq=False)
-class Robot:
-    name: str
-    links: List[Link] = field(default_factory=list)
-    joints: List[Joint] = field(default_factory=list)
-    materials: List[Material] = field(default_factory=list)
-    transmission: List[str] = field(default_factory=list)
-    gazebo: List[str] = field(default_factory=list)
-
-    def __eq__(self, other):
-        if not isinstance(other, Robot):
-            return NotImplementedError
-        return (
-            self.name == other.name
-            and all(self_link in other.links for self_link in self.links)
-            and all(other_link in self.links for other_link in other.links)
-            and all(self_joint in other.joints for self_joint in self.joints)
-            and all(other_joint in self.joints for other_joint in other.joints)
-            and all(
-                self_material in other.materials for self_material in self.materials
-            )
-            and all(
-                other_material in self.materials for other_material in other.materials
-            )
-            and all(
-                self_transmission in other.transmission
-                for self_transmission in self.transmission
-            )
-            and all(
-                other_transmission in self.transmission
-                for other_transmission in other.transmission
-            )
-            and all(self_gazebo in other.gazebo for self_gazebo in self.gazebo)
-            and all(other_gazebo in self.gazebo for other_gazebo in other.gazebo)
-        )
-
 
 class URDFError(Exception):
     """General URDF exception."""
@@ -388,7 +74,8 @@ class URDFSaveValidationError(URDFError):
 class URDF:
     def __init__(
         self,
-        robot: Robot = None,
+        urdf: rtb_URDF = None,
+        robot: rtb.ERobot = None,
         build_scene_graph: bool = True,
         build_collision_scene_graph: bool = True,
         mesh_dir: str = "",
@@ -402,6 +89,7 @@ class URDF:
         """A URDF model.
 
         Args:
+            urdf (rtb.tools.URDF): the URDF object after parsing the URDF file.
             robot (rtb.ERobot): The robot model. Defaults to None.
             build_scene_graph (bool, optional): Whether to build a scene graph to enable transformation queries and forward kinematics. Defaults to True.
             build_collision_scene_graph (bool, optional): Whether to build a scene graph for <collision> elements. Defaults to True.
@@ -418,6 +106,7 @@ class URDF:
         else:
             self._filename_handler = filename_handler
 
+        self.urdf: rtb_URDF = urdf
         self.robot: rtb.ERobot = robot
         self._create_maps()
 
@@ -504,14 +193,28 @@ class URDF:
             kwargs["mesh_dir"] = os.path.dirname(file_path)
 
         try:
-            links, name, urdf_string, urdf_filepath = rtb.ERobot.URDF_read(file_path, tld="")
+            ### First: Parse URDF File
+            _, ext = os.path.splitext(file_path)
+
+            if ext == ".xacro":
+                # it's a xacro file, preprocess it
+                urdf_string = rtb_xacro.main(file_path)
+            else:  # pragma nocover
+                urdf_string = open(file_path).read()
+            if not isinstance(urdf_string, str):  # pragma nocover
+                raise ValueError("urdf_rtb.py >> load(): Parsing failed, did not get valid URDF string back")
+            urdf: rtb_URDF = rtb_URDF.loadstr(urdf_string, file_path, tld="")
+
+
+            ### Second: Create Robot Model
+            links, name, urdf_string, urdf_filepath = urdf.elinks, urdf.name, urdf_string, file_path
 
             gripper = kwargs.get("gripper", None)
             gripperLink: Union[rtb.Link, None] = None
             if kwargs.get("gripper", None) is None:
                 if isinstance(gripper, int):
                     if gripper > len(links):
-                        raise ValueError(f"gripper index {gripper} out of range")
+                        raise ValueError(f"urdf_rtb.py >> load(): gripper index {gripper} out of range")
                     gripperLink = links[gripper]
                 elif isinstance(gripper, str):
                     for link in links:
@@ -519,9 +222,9 @@ class URDF:
                             gripperLink = link
                             break
                     else:  # pragma nocover
-                        raise ValueError(f"no link named {gripper}")
+                        raise ValueError(f"urdf_rtb.py >> load(): no link named {gripper}")
                 else:  # pragma nocover
-                    raise TypeError("bad argument passed as gripper")
+                    raise TypeError("urdf_rtb.py >> load(): bad argument passed as gripper")
 
             robot = rtb.ERobot(
                 links, 
@@ -530,11 +233,12 @@ class URDF:
                 urdf_string=urdf_string, 
                 urdf_filepath=urdf_filepath
             )
+
         except Exception as e:
             _logger.error(e)
-            raise URDFMalformedError("Failed to parse XML file")
+            raise URDFMalformedError("urdf_rtb.py >> load(): Failed to parse XML file")
 
-        return URDF(robot=robot, **kwargs)
+        return URDF(urdf=urdf, robot=robot, **kwargs)
 
 
     ###############################################
@@ -584,7 +288,7 @@ class URDF:
         Returns:
             list[str]: List of joint names of the URDF model.
         """
-        return [j.name for j in self.robot.joints]
+        return [j.name for j in self.robot.links if j.isjoint]
 
     @property
     def actuated_joints(self):
@@ -789,20 +493,31 @@ class URDF:
     ##########################################################
 
     def _geometry2trimeshscene(self, geometry, load_file: bool, force_mesh: bool):
+        """Import a single geometry object into a trimesh scene.
+
+        Args:
+            geometry (sg.Geometry): A geometry object.
+            load_file (bool): Whether to load the geometry file.
+            force_mesh (bool): Whether to force the geometry to be a single mesh.
+
+        Returns:
+            trimesh.Scene: A trimesh scene object.
+        """
+
         new_s = None
-        if geometry.box is not None:
-            new_s = trimesh.primitives.Box(extents=geometry.box.size).scene()
-        elif geometry.sphere is not None:
-            new_s = trimesh.primitives.Sphere(radius=geometry.sphere.radius).scene()
-        elif geometry.cylinder is not None:
+        if isinstance(geometry, sg.Cuboid):
+            new_s = trimesh.primitives.Box(extents=geometry.scale).scene()
+        elif isinstance(geometry, sg.Sphere):
+            new_s = trimesh.primitives.Sphere(radius=geometry.radius).scene()
+        elif isinstance(geometry, sg.Cylinder):
             new_s = trimesh.primitives.Cylinder(
-                radius=geometry.cylinder.radius, height=geometry.cylinder.length
+                radius=geometry.radius, height=geometry.length
             ).scene()
-        elif geometry.mesh is not None and load_file:
-            new_filename = self._filename_handler(geometry.mesh.filename)
+        elif isinstance(geometry, sg.Mesh) and load_file:
+            new_filename = self._filename_handler(geometry.filename)
 
             if os.path.isfile(new_filename):
-                _logger.debug(f"Loading {geometry.mesh.filename} as {new_filename}")
+                _logger.debug(f"Loading {geometry.filename} as {new_filename}")
 
                 if force_mesh:
                     new_g = trimesh.load(new_filename, force="mesh")
@@ -825,14 +540,14 @@ class URDF:
                                 geom.metadata["file_element"] = i
 
                 # scale mesh appropriately
-                if geometry.mesh.scale is not None:
-                    if isinstance(geometry.mesh.scale, float):
-                        new_s = new_s.scaled(geometry.mesh.scale)
-                    elif isinstance(geometry.mesh.scale, np.ndarray):
-                        new_s = new_s.scaled(geometry.mesh.scale)
+                if geometry.scale is not None:
+                    if isinstance(geometry.scale, float):
+                        new_s = new_s.scaled(geometry.scale)
+                    elif isinstance(geometry.scale, np.ndarray):
+                        new_s = new_s.scaled(geometry.scale)
                     else:
                         _logger.warning(
-                            f"Warning: Can't interpret scale '{geometry.mesh.scale}'"
+                            f"Warning: Can't interpret scale '{geometry.scale}'"
                         )
             else:
                 _logger.warning(f"Can't find {new_filename}")
@@ -840,7 +555,7 @@ class URDF:
 
     def _add_geometries_to_scene(
         self,
-        s: trimesh.scene.Scene,
+        s: trimesh.Scene,
         geometries: sg.SceneGroup,
         link_name: str,
         load_geometry: bool,
@@ -848,13 +563,17 @@ class URDF:
         force_single_geometry: bool,
         skip_materials: bool,
     ):
+        """
+        Add all geometries on a Link to a trimesh scene.
+        """
+
         if force_single_geometry:
             tmp_scene = trimesh.Scene(base_frame=link_name)
 
         def apply_visual_color(
             geom: trimesh.Trimesh,
-            visual: Visual,
-            material_map: Dict[str, Material],
+            visual,
+            material_map: Dict[str, ],
         ) -> None:
             """Apply the color of the visual material to the mesh.
 
@@ -894,15 +613,15 @@ class URDF:
                         T, geom_name = new_s.graph.get(name)
                         geom = new_s.geometry[geom_name]
 
-                        if isinstance(v, Visual):
-                            if skip_materials:
-                                geom.visual = trimesh.visual.ColorVisuals(geom) # remove color information
-                            else:
-                                apply_visual_color(geom, v, self._material_map)
+                        # if isinstance(v, Visual):
+                        #     if skip_materials:
+                        #         geom.visual = trimesh.visual.ColorVisuals(geom) # remove color information
+                        #     else:
+                        #         apply_visual_color(geom, v, self._material_map)
 
                         tmp_scene.add_geometry(
                             geometry=geom,
-                            geom_name=v.name,
+                            geom_name=geom_name,
                             parent_node_name=link_name,
                             transform=origin @ T,
                         )
@@ -911,15 +630,15 @@ class URDF:
                         T, geom_name = new_s.graph.get(name)
                         geom = new_s.geometry[geom_name]
 
-                        if isinstance(v, Visual):
-                            if skip_materials:
-                                geom.visual = trimesh.visual.ColorVisuals(geom) # remove color information
-                            else:
-                                apply_visual_color(geom, v, self._material_map)
+                        # if isinstance(v, Visual):
+                        #     if skip_materials:
+                        #         geom.visual = trimesh.visual.ColorVisuals(geom) # remove color information
+                        #     else:
+                        #         apply_visual_color(geom, v, self._material_map)
 
                         s.add_geometry(
                             geometry=geom,
-                            geom_name=v.name,
+                            geom_name=geom_name,
                             parent_node_name=link_name,
                             transform=origin @ T,
                         )
@@ -940,7 +659,7 @@ class URDF:
         force_single_geometry_per_link: bool = False,
         skip_materials: bool = False,
     ):
-        s = trimesh.scene.Scene(base_frame=self._base_link)
+        s = trimesh.Scene(base_frame=self._base_link)
 
         T = self.robot.fkine_all(self.robot.q)
 
@@ -1019,469 +738,6 @@ class URDF:
                 )
 
 
-    ##########################################
-    # The following part is for URDF parsing #
-    ##########################################
-
-    @staticmethod
-    def _parse_robot(xml_element):
-        robot = Robot(name=xml_element.attrib["name"])
-
-        for link in xml_element.findall("link"):
-            robot.links.append(URDF._parse_link(link))
-        for j in xml_element.findall("joint"):
-            robot.joints.append(URDF._parse_joint(j))
-        for m in xml_element.findall("material"):
-            robot.materials.append(URDF._parse_material(m))
-        return robot
-
-    def _parse_link(xml_element):
-        link = Link(name=xml_element.attrib["name"])
-
-        link.inertial = URDF._parse_inertial(xml_element.find("inertial"))
-
-        for v in xml_element.findall("visual"):
-            link.visuals.append(URDF._parse_visual(v))
-
-        for c in xml_element.findall("collision"):
-            link.collisions.append(URDF._parse_collision(c))
-
-        return link
-
-    def _parse_inertial(xml_element):
-        if xml_element is None:
-            return None
-
-        inertial = Inertial()
-        inertial.origin = URDF._parse_origin(xml_element.find("origin"))
-        inertial.inertia = URDF._parse_inertia(xml_element.find("inertia"))
-        inertial.mass = URDF._parse_mass(xml_element.find("mass"))
-
-        return inertial
-    
-    def _parse_origin(xml_element):
-        if xml_element is None:
-            return None
-
-        xyz = xml_element.get("xyz", default="0 0 0")
-        rpy = xml_element.get("rpy", default="0 0 0")
-
-        return tra.compose_matrix(
-            translate=np.array(list(map(float, xyz.split()))),
-            angles=np.array(list(map(float, rpy.split()))),
-        )
-
-    def _parse_inertia(xml_element):
-        if xml_element is None:
-            return None
-
-        x = xml_element
-
-        return np.array(
-            [
-                [
-                    x.get("ixx", default=1.0),
-                    x.get("ixy", default=0.0),
-                    x.get("ixz", default=0.0),
-                ],
-                [
-                    x.get("ixy", default=0.0),
-                    x.get("iyy", default=1.0),
-                    x.get("iyz", default=0.0),
-                ],
-                [
-                    x.get("ixz", default=0.0),
-                    x.get("iyz", default=0.0),
-                    x.get("izz", default=1.0),
-                ],
-            ],
-            dtype=np.float64,
-        )
-
-    def _parse_mass(xml_element):
-        if xml_element is None:
-            return None
-
-        return str2float(xml_element.get("value", default=0.0))
-
-    def _parse_collision(xml_element):
-        collision = Collision(name=xml_element.get("name"))
-
-        collision.geometry = URDF._parse_geometry(xml_element.find("geometry"))
-        collision.origin = URDF._parse_origin(xml_element.find("origin"))
-
-        return collision
-
-    def _parse_visual(xml_element):
-        visual = Visual(name=xml_element.get("name"))
-
-        visual.geometry = URDF._parse_geometry(xml_element.find("geometry"))
-        visual.origin = URDF._parse_origin(xml_element.find("origin"))
-        visual.material = URDF._parse_material(xml_element.find("material"))
-
-        return visual
-
-    def _parse_geometry(xml_element):
-        geometry = Geometry()
-        if xml_element[0].tag == "box":
-            geometry.box = URDF._parse_box(xml_element[0])
-        elif xml_element[0].tag == "cylinder":
-            geometry.cylinder = URDF._parse_cylinder(xml_element[0])
-        elif xml_element[0].tag == "sphere":
-            geometry.sphere = URDF._parse_sphere(xml_element[0])
-        elif xml_element[0].tag == "mesh":
-            geometry.mesh = URDF._parse_mesh(xml_element[0])
-        else:
-            raise ValueError(f"Unknown tag: {xml_element[0].tag}")
-
-        return geometry
-
-    def _parse_box(xml_element):
-        # In case the element uses comma as a separator
-        size = xml_element.attrib["size"].replace(',', ' ').split()
-        return Box(size=np.array(size, dtype=np.float64))
-    
-    def _parse_cylinder(xml_element):
-        return Cylinder(
-            radius=float(xml_element.attrib["radius"]),
-            length=float(xml_element.attrib["length"]),
-        )
-    
-    def _parse_sphere(xml_element):
-        return Sphere(radius=float(xml_element.attrib["radius"]))
-    
-    def _parse_mesh(xml_element):
-        return Mesh(
-            filename=xml_element.get("filename"), scale=URDF._parse_scale(xml_element)
-        )
-
-    def _parse_scale(xml_element):
-        if "scale" in xml_element.attrib:
-            # In case the element uses comma as a separator
-            s = xml_element.get("scale").replace(',', ' ').split()
-            if len(s) == 0:
-                return None
-            elif len(s) == 1:
-                return float(s[0])
-            else:
-                return np.array(list(map(float, s)))
-        return None
-
-    def _parse_material(xml_element):
-        if xml_element is None:
-            return None
-
-        material = Material(name=xml_element.get("name"))
-        material.color = URDF._parse_color(xml_element.find("color"))
-        material.texture = URDF._parse_texture(xml_element.find("texture"))
-
-        return material
-
-    def _parse_color(xml_element):
-        if xml_element is None:
-            return None
-
-        rgba = xml_element.get("rgba", default="1 1 1 1")
-
-        return Color(rgba=np.array(list(map(float, rgba.split()))))
-
-    def _parse_texture(xml_element):
-        if xml_element is None:
-            return None
-
-        # TODO: use texture filename handler
-        return Texture(filename=xml_element.get("filename", default=None))
-
-    def _parse_joint(xml_element):
-        joint = Joint(name=xml_element.attrib["name"])
-
-        joint.type = xml_element.get("type", default=None)
-        joint.parent = xml_element.find("parent").get("link")
-        joint.child = xml_element.find("child").get("link")
-        joint.origin = URDF._parse_origin(xml_element.find("origin"))
-        joint.axis = URDF._parse_axis(xml_element.find("axis"))
-        joint.limit = URDF._parse_limit(xml_element.find("limit"))
-        joint.dynamics = URDF._parse_dynamics(xml_element.find("dynamics"))
-        joint.mimic = URDF._parse_mimic(xml_element.find("mimic"))
-        joint.calibration = URDF._parse_calibration(xml_element.find("calibration"))
-        joint.safety_controller = URDF._parse_safety_controller(
-            xml_element.find("safety_controller")
-        )
-
-        return joint
-
-    def _parse_axis(xml_element):
-        if xml_element is None:
-            return np.array([1.0, 0, 0])
-
-        xyz = xml_element.get("xyz", "1 0 0")
-        return np.array(list(map(float, xyz.split())))
-
-    def _parse_limit(xml_element):
-        if xml_element is None:
-            return None
-
-        return Limit(
-            effort=str2float(xml_element.get("effort", default=None)),
-            velocity=str2float(xml_element.get("velocity", default=None)),
-            lower=str2float(xml_element.get("lower", default=None)),
-            upper=str2float(xml_element.get("upper", default=None)),
-        )
-
-    def _parse_dynamics(xml_element):
-        if xml_element is None:
-            return None
-
-        dynamics = Dynamics()
-        dynamics.damping = xml_element.get("damping", default=None)
-        dynamics.friction = xml_element.get("friction", default=None)
-
-        return dynamics
-
-    def _parse_mimic(xml_element):
-        if xml_element is None:
-            return None
-
-        return Mimic(
-            joint=xml_element.get("joint"),
-            multiplier=str2float(xml_element.get("multiplier", 1.0)),
-            offset=str2float(xml_element.get("offset", 0.0)),
-        )
-
-    def _parse_calibration(xml_element):
-        if xml_element is None:
-            return None
-
-        return Calibration(
-            rising=str2float(xml_element.get("rising")),
-            falling=str2float(xml_element.get("falling")),
-        )
-
-    def _parse_safety_controller(xml_element):
-        if xml_element is None:
-            return None
-
-        return SafetyController(
-            soft_lower_limit=str2float(xml_element.get("soft_lower_limit")),
-            soft_upper_limit=str2float(xml_element.get("soft_upper_limit")),
-            k_position=str2float(xml_element.get("k_position")),
-            k_velocity=str2float(xml_element.get("k_velocity")),
-        )
-
-    def _parse_transmission_joint(xml_element):
-        if xml_element is None:
-            return None
-
-        transmission_joint = TransmissionJoint(name=xml_element.get("name"))
-
-        for h in xml_element.findall("hardware_interface"):
-            transmission_joint.hardware_interfaces.append(h.text)
-
-        return transmission_joint
-
-    def _parse_actuator(xml_element):
-        if xml_element is None:
-            return None
-
-        actuator = Actuator(name=xml_element.get("name"))
-        if xml_element.find("mechanicalReduction"):
-            actuator.mechanical_reduction = float(
-                xml_element.find("mechanicalReduction").text
-            )
-
-        for h in xml_element.findall("hardwareInterface"):
-            actuator.hardware_interfaces.append(h.text)
-
-        return actuator
-
-    def _parse_transmission(xml_element):
-        if xml_element is None:
-            return None
-
-        transmission = Transmission(name=xml_element.get("name"))
-
-        for j in xml_element.findall("joint"):
-            transmission.joints.append(URDF._parse_transmission_joint(j))
-        for a in xml_element.findall("actuator"):
-            transmission.actuators.append(URDF._parse_actuator(a))
-
-        return transmission
-
-    #############################################
-    # The following part is for URDF validation #
-    #############################################
-
-    def _validation_handler_strict(self, errors):
-        """A validation handler that does not allow any errors.
-
-        Args:
-            errors (list[URDFError]): List of errors.
-
-        Returns:
-            bool: Whether any errors were found.
-        """
-        return len(errors) == 0
-
-    def validate(self, validation_fn=None) -> bool:
-        """Validate URDF model.
-
-        Args:
-            validation_fn (function, optional): A function f(list[URDFError]) -> bool. None uses the strict ha-
-            ndler (any error leads to False). Defaults to None.
-
-        Returns:
-            bool: Whether the model is valid.
-        """
-        self._errors = []
-        self._validate_robot(self.robot)
-
-        if validation_fn is None:
-            validation_fn = self._validation_handler_strict
-
-        return validation_fn(self._errors)
-
-    def _validate_robot(self, robot):
-        if robot is not None:
-            self._validate_required_attribute(
-                attribute=robot.name,
-                error_msg="The <robot> tag misses a 'name' attribute.",
-            )
-
-            for link in robot.links:
-                self._validate_link(link)
-
-            for j in robot.joints:
-                self._validate_joint(j)
-
-    def _validate_link(self, link):
-        self._validate_required_attribute(
-            attribute=link.name, error_msg="The <link> tag misses a 'name' attribute."
-        )
-
-        for v in link.visuals:
-            self._validate_visual(v)
-
-        for c in link.collisions:
-            self._validate_collision(c)
-
-    def _validate_filenames(self):
-        for link in self.robot.links:
-            meshes = [
-                m.geometry.mesh
-                for m in link.collisions + link.visuals
-                if m.geometry.mesh is not None
-            ]
-            for m in meshes:
-                _logger.debug(m.filename, "-->", self._filename_handler(m.filename))
-                if not os.path.isfile(self._filename_handler(m.filename)):
-                    return False
-        return True
-
-    def _validate_collision(self, collision):
-        self._validate_geometry(collision.geometry)
-
-    def _validate_visual(self, visual):
-        self._validate_geometry(visual.geometry)
-
-    def _validate_geometry(self, geometry):
-        if geometry is None:
-            self._errors.append(URDFIncompleteError("<geometry> is missing."))
-
-        num_nones = sum(
-            [
-                x is not None
-                for x in [
-                    geometry.box,
-                    geometry.cylinder,
-                    geometry.sphere,
-                    geometry.mesh,
-                ]
-            ]
-        )
-        if num_nones < 1:
-            self._errors.append(
-                URDFIncompleteError(
-                    "One of <sphere>, <cylinder>, <box>, <mesh> needs to be defined as a child of <geometry>."
-                )
-            )
-        elif num_nones > 1:
-            self._errors.append(
-                URDFError(
-                    "Too many of <sphere>, <cylinder>, <box>, <mesh> defined as a child of <geometry>. Only one allowed."
-                )
-            )
-
-    def _validate_required_attribute(self, attribute, error_msg, allowed_values=None):
-        if attribute is None:
-            self._errors.append(URDFIncompleteError(error_msg))
-        elif isinstance(attribute, str) and len(attribute) == 0:
-            self._errors.append(URDFIncompleteError(error_msg))
-
-        if allowed_values is not None and attribute is not None:
-            if attribute not in allowed_values:
-                self._errors.append(URDFAttributeValueError(error_msg))
-
-    def _validate_joint(self, joint):
-        self._validate_required_attribute(
-            attribute=joint.name,
-            error_msg="The <joint> tag misses a 'name' attribute.",
-        )
-
-        allowed_types = [
-            "revolute",
-            "continuous",
-            "prismatic",
-            "fixed",
-            "floating",
-            "planar",
-        ]
-        self._validate_required_attribute(
-            attribute=joint.type,
-            error_msg=f"The <joint> tag misses a 'type' attribute or value is not part of allowed values [{', '.join(allowed_types)}].",
-            allowed_values=allowed_types,
-        )
-
-        self._validate_required_attribute(
-            joint.parent,
-            error_msg="The <parent> of a <joint> is missing.",
-        )
-
-        self._validate_required_attribute(
-            joint.child,
-            error_msg="The <child> of a <joint> is missing.",
-        )
-
-        self._validate_limit(joint.limit, type=joint.type)
-
-    def _validate_limit(self, limit, type):
-        if type in ["revolute", "prismatic"]:
-            self._validate_required_attribute(
-                limit,
-                error_msg="The <limit> of a (prismatic, revolute) joint is missing.",
-            )
-
-            if limit is not None:
-                self._validate_required_attribute(
-                    limit.upper,
-                    error_msg="Tag <limit> of joint is missing attribute 'upper'.",
-                )
-                self._validate_required_attribute(
-                    limit.lower,
-                    error_msg="Tag <limit> of joint is missing attribute 'lower'.",
-                )
-
-        if limit is not None:
-            self._validate_required_attribute(
-                limit.effort,
-                error_msg="Tag <limit> of joint is missing attribute 'effort'.",
-            )
-
-            self._validate_required_attribute(
-                limit.velocity,
-                error_msg="Tag <limit> of joint is missing attribute 'velocity'.",
-            )
-
-
     ###########################################
     # The following part is for XML exporting #
     ###########################################
@@ -1513,7 +769,7 @@ class URDF:
         xml_element = self.write_xml()
         xml_element.write(fname, xml_declaration=True, pretty_print=True)
 
-    def _write_robot(self, robot):
+    def _write_robot(self, robot: rtb.ERobot):
         xml_element = etree.Element("robot", attrib={"name": robot.name})
         for link in robot.links:
             self._write_link(xml_element, link)
@@ -1524,7 +780,7 @@ class URDF:
 
         return xml_element
 
-    def _write_link(self, xml_parent, link):
+    def _write_link(self, xml_parent, link: rtb.Link):
         xml_element = etree.SubElement(
             xml_parent,
             "link",
@@ -1533,13 +789,20 @@ class URDF:
             },
         )
 
-        self._write_inertial(xml_element, link.inertial)
-        for visual in link.visuals:
+        self._write_inertial(
+            xml_element, 
+            dict(
+                mass=link.m,
+                inertia=link.I,
+                origin=link.r,
+            )
+        )
+        for visual in link.geometry:
             self._write_visual(xml_element, visual)
-        for collision in link.collisions:
+        for collision in link.collision:
             self._write_collision(xml_element, collision)
 
-    def _write_inertial(self, xml_parent, inertial):
+    def _write_inertial(self, xml_parent, inertial:dict):
         if inertial is None:
             return
 
