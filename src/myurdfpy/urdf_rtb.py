@@ -2,7 +2,7 @@ import os
 import logging
 from functools import partial
 from dataclasses import is_dataclass
-from typing import Dict, Union
+from typing import Union
 
 import six
 import numpy as np
@@ -11,8 +11,8 @@ import trimesh.transformations as tra
 from lxml import etree
 import spatialgeometry as sg
 import roboticstoolbox as rtb
+import roboticstoolbox.tools.urdf as rtb_urdf
 import roboticstoolbox.tools.xacro as rtb_xacro
-from roboticstoolbox.tools import URDF as rtb_URDF
 
 from myurdfpy.utils import filename_handler_magic
 
@@ -74,7 +74,7 @@ class URDFSaveValidationError(URDFError):
 class URDF:
     def __init__(
         self,
-        urdf: rtb_URDF = None,
+        urdf: rtb_urdf.URDF = None,
         robot: rtb.ERobot = None,
         build_scene_graph: bool = True,
         build_collision_scene_graph: bool = True,
@@ -106,11 +106,10 @@ class URDF:
         else:
             self._filename_handler = filename_handler
 
-        self.urdf: rtb_URDF = urdf
+        self.urdf: rtb_urdf.URDF = urdf
         self.robot: rtb.ERobot = robot
         self._create_maps()
-
-        self._cfg = self.zero_cfg
+        self._update_actuated_joints()
 
         if build_scene_graph or build_collision_scene_graph:
             self._base_link = self.robot.base_link
@@ -159,15 +158,21 @@ class URDF:
                 self._joint_map[link.name] = link
 
     def _update_actuated_joints(self):
+        """
+        Actuated joints will be sorted according to their jindex, so when
+        updating configuration using an np.ndarray, the order of values in 
+        the array will match the order of joint in list self.actuated_joints.
+        """
+
         self._actuated_joints: list[rtb.Link] = []
         self._actuated_dof_indices: list[list[int]] = []
 
-        dof_indices_cnt = 0
         for j in [link for link in self.robot.links if link.isjoint]:
             self._actuated_joints.append(j)
+        self._actuated_joints.sort(key = lambda j:j.jindex)
+        for j in self._actuated_joints:
+            self._actuated_dof_indices.append([j.jindex])
 
-            self._actuated_dof_indices.append([dof_indices_cnt])
-            dof_indices_cnt += 1
 
     ###############################################################
     # The following method is the main entry point for this class #
@@ -214,7 +219,7 @@ class URDF:
                 urdf_string = open(file_path).read()
             if not isinstance(urdf_string, str):  # pragma nocover
                 raise ValueError("urdf_rtb.py >> load(): Parsing failed, did not get valid URDF string back")
-            urdf: rtb_URDF = rtb_URDF.loadstr(urdf_string, file_path, tld="")
+            urdf: rtb_urdf.URDF = rtb_urdf.URDF.loadstr(urdf_string, file_path, base_path="")
 
 
             ### Second: Create Robot Model
@@ -222,7 +227,7 @@ class URDF:
 
             gripper = kwargs.get("gripper", None)
             gripperLink: Union[rtb.Link, None] = None
-            if kwargs.get("gripper", None) is None:
+            if gripper is not None:
                 if isinstance(gripper, int):
                     if gripper > len(links):
                         raise ValueError(f"urdf_rtb.py >> load(): gripper index {gripper} out of range")
@@ -308,7 +313,7 @@ class URDF:
         Returns:
             list[Joint]: List of actuated joints of the URDF model.
         """
-        return self.actuated_joints
+        return self._actuated_joints
 
     @property
     def actuated_dof_indices(self):
@@ -335,7 +340,7 @@ class URDF:
         Returns:
             list[str]: List of names of actuated joints of the URDF model.
         """
-        return [name for name, j in self._joint_map]
+        return [j.name for j in self._actuated_joints]
 
     @property
     def num_actuated_joints(self):
@@ -344,7 +349,7 @@ class URDF:
         Returns:
             int: Number of actuated joints.
         """
-        return len(self._joint_map)
+        return len(self._actuated_joints)
 
     @property
     def num_dofs(self):
@@ -354,7 +359,7 @@ class URDF:
             int: Degrees of freedom.
         """
 
-        return len(self._joint_map)
+        return len(self._actuated_joints)
 
     @property
     def zero_cfg(self):
@@ -394,7 +399,16 @@ class URDF:
         Returns:
             np.ndarray: Current configuration of URDF model.
         """
-        return self._cfg
+        return self.robot.q
+
+    @cfg.setter
+    def cfg(self, value):
+        """Set the current configuration.
+
+        Args:
+            value (np.ndarray): The new configuration.
+        """
+        self.robot.q = value    
 
     @property
     def base_link(self):
@@ -572,7 +586,7 @@ class URDF:
         def apply_visual_color(
             geom: trimesh.Trimesh,
             visual,
-            material_map: Dict[str, ],
+            material_map: dict,
         ) -> None:
             """Apply the color of the visual material to the mesh.
 
@@ -605,7 +619,7 @@ class URDF:
                 force_mesh=force_mesh,
             )
             if new_s is not None:
-                origin = g.origin if g.origin is not None else np.eye(4)
+                origin = g._wT if g._wT is not None else np.eye(4)
 
                 if force_single_geometry:
                     for name in new_s.graph.nodes_geometry:
@@ -693,48 +707,42 @@ class URDF:
             ValueError: Raised if dimensionality of configuration does not match number of actuated joints of URDF model.
             TypeError: Raised if configuration is neither a dict, list, tuple or np.ndarray.
         """
-        joint_cfg = []
+        joint_cfg = self.robot.q.copy()
 
         if isinstance(configuration, dict):
             for joint in configuration:
                 if isinstance(joint, six.string_types):
-                    joint_cfg.append((self._joint_map[joint], configuration[joint]))
+                    joint_cfg[self._joint_map[joint].jindex] = configuration[joint]
                 else:
                     raise TypeError("Invalid type for joint name")
         elif isinstance(configuration, (list, tuple, np.ndarray)):
-            if len(configuration) == len(self.robot.joints):
-                for joint, value in zip(self.robot.joints, configuration):
-                    joint_cfg.append((joint, value))
-            elif len(configuration) == self.num_actuated_joints:
-                for joint, value in zip(self._actuated_joints, configuration):
-                    joint_cfg.append((joint, value))
-            else:
+            if len(configuration) != self.num_actuated_joints:
                 raise ValueError(
-                    f"Dimensionality of configuration ({len(configuration)}) doesn't match number of all ({len(self.robot.joints)}) or actuated joints ({self.num_actuated_joints})."
+                    f"Dimensionality of configuration ({len(configuration)}) doesn't match number of actuated joints ({self.num_actuated_joints})."
                 )
         else:
             raise TypeError("Invalid type for configuration")
 
         # append all mimic joints in the update
-        for j, q in joint_cfg + [
-            (j, 0.0) for j in self.robot.joints if j.mimic is not None
-        ]:
-            matrix, joint_q = self._forward_kinematics_joint(j, q=q)
+        T = self.robot.fkine_all(q=joint_cfg)
 
-            # update internal configuration vector - only consider actuated joints
-            if j.name in self.actuated_joint_names:
-                self._cfg[
-                    self.actuated_dof_indices[self.actuated_joint_names.index(j.name)]
-                ] = joint_q
+        # update internal configuration vector - only consider actuated joints
+        self.cfg = joint_cfg
 
-            if self._scene is not None:
-                self._scene.graph.update(
-                    frame_from=j.parent, frame_to=j.child, matrix=matrix
-                )
-            if self._scene_collision is not None:
-                self._scene_collision.graph.update(
-                    frame_from=j.parent, frame_to=j.child, matrix=matrix
-                )
+        if self._scene is not None:
+            for name, link in self.link_map.items():
+                self._scene.graph.update(name, matrix=T[link.number])
+
+        if self._scene_collision is not None:
+            for name, link in self.link_map.items():
+                self._scene_collision.graph.update(name, matrix=T[link.number])
+
+
+    def IK(self, frame_to, frame_from=None, target=None, q0=None, **kwargs):
+        """Compute the inverse kinematics for a given frame_to and target position.
+        """
+
+        self.robot.ik_GN
 
 
     ###########################################
@@ -747,7 +755,7 @@ class URDF:
         Returns:
             etree.ElementTree: XML data.
         """
-        xml_element = self._write_robot(self.robot)
+        xml_element = self._write_robot(self.urdf)
         return etree.ElementTree(xml_element)
 
     def write_xml_string(self, **kwargs):
@@ -766,20 +774,20 @@ class URDF:
             fname (str): Filename of the file to be written. Usually ends in `.urdf`.
         """
         xml_element = self.write_xml()
-        xml_element.write(fname, xml_declaration=True, pretty_print=True)
+        xml_element.write(fname, xml_declaration=True, pretty_print=True, encoding="utf-8")
 
-    def _write_robot(self, robot: rtb.ERobot):
-        xml_element = etree.Element("robot", attrib={"name": robot.name})
-        for link in robot.links:
+    def _write_robot(self, urdf: rtb_urdf.URDF):
+        xml_element = etree.Element("robot", attrib={"name": urdf.name})
+        for link in urdf.links:
             self._write_link(xml_element, link)
-        for joint in robot.joints:
+        for joint in urdf.joints:
             self._write_joint(xml_element, joint)
-        for material in robot.materials:
+        for material in urdf._materials:
             self._write_material(xml_element, material)
 
         return xml_element
 
-    def _write_link(self, xml_parent, link: rtb.Link):
+    def _write_link(self, xml_parent, link: rtb_urdf.Link):
         xml_element = etree.SubElement(
             xml_parent,
             "link",
@@ -788,20 +796,13 @@ class URDF:
             },
         )
 
-        self._write_inertial(
-            xml_element, 
-            dict(
-                mass=link.m,
-                inertia=link.I,
-                origin=link.r,
-            )
-        )
-        for visual in link.geometry:
+        self._write_inertial(xml_element, link.inertial)
+        for visual in link.visuals:
             self._write_visual(xml_element, visual)
-        for collision in link.collision:
+        for collision in link.collisions:
             self._write_collision(xml_element, collision)
 
-    def _write_inertial(self, xml_parent, inertial:dict):
+    def _write_inertial(self, xml_parent, inertial:rtb_urdf.Inertial):
         if inertial is None:
             return
 
@@ -853,7 +854,7 @@ class URDF:
             },
         )
 
-    def _write_collision(self, xml_parent, collision):
+    def _write_collision(self, xml_parent, collision: rtb_urdf.Collision):
         attrib = {"name": collision.name} if collision.name is not None else {}
         xml_element = etree.SubElement(
             xml_parent,
@@ -861,10 +862,10 @@ class URDF:
             attrib=attrib,
         )
 
-        self._write_geometry(xml_element, collision.geometry)
         self._write_origin(xml_element, collision.origin)
+        self._write_geometry(xml_element, collision.geometry)
 
-    def _write_visual(self, xml_parent, visual):
+    def _write_visual(self, xml_parent, visual: rtb_urdf.Visual):
         attrib = {"name": visual.name} if visual.name is not None else {}
         xml_element = etree.SubElement(
             xml_parent,
@@ -872,45 +873,45 @@ class URDF:
             attrib=attrib,
         )
 
-        self._write_geometry(xml_element, visual.geometry)
         self._write_origin(xml_element, visual.origin)
+        self._write_geometry(xml_element, visual.geometry)
         self._write_material(xml_element, visual.material)
 
-    def _write_geometry(self, xml_parent, geometry):
+    def _write_geometry(self, xml_parent, geometry: rtb_urdf.Geometry):
         if geometry is None:
             return
 
         xml_element = etree.SubElement(xml_parent, "geometry")
-        if geometry.box is not None:
+        if isinstance(geometry.ob, sg.Box):
             self._write_box(xml_element, geometry.box)
-        elif geometry.cylinder is not None:
+        elif isinstance(geometry.ob, sg.Cylinder):
             self._write_cylinder(xml_element, geometry.cylinder)
-        elif geometry.sphere is not None:
+        elif isinstance(geometry.ob, sg.Sphere):
             self._write_sphere(xml_element, geometry.sphere)
-        elif geometry.mesh is not None:
+        elif isinstance(geometry.ob, sg.Mesh):
             self._write_mesh(xml_element, geometry.mesh)
 
-    def _write_box(self, xml_parent, box):
+    def _write_box(self, xml_parent, box: rtb_urdf.Box):
         etree.SubElement(
             xml_parent, "box", attrib={"size": " ".join(map(str, box.size))}
         )
 
-    def _write_cylinder(self, xml_parent, cylinder):
+    def _write_cylinder(self, xml_parent, cylinder: rtb_urdf.Cylinder):
         etree.SubElement(
             xml_parent,
             "cylinder",
             attrib={"radius": str(cylinder.radius), "length": str(cylinder.length)},
         )
 
-    def _write_sphere(self, xml_parent, sphere):
+    def _write_sphere(self, xml_parent, sphere: rtb_urdf.Sphere):
         etree.SubElement(xml_parent, "sphere", attrib={"radius": str(sphere.radius)})
 
-    def _write_mesh(self, xml_parent, mesh):
+    def _write_mesh(self, xml_parent, mesh: rtb_urdf.Mesh):
         # TODO: turn into different filename handler
         xml_element = etree.SubElement(
             xml_parent,
             "mesh",
-            attrib={"filename": self._filename_handler(mesh.filename)},
+            attrib={"filename": mesh.filename},
         )
 
         self._write_scale(xml_element, mesh.scale)
@@ -936,12 +937,12 @@ class URDF:
         self._write_color(xml_element, material.color)
         self._write_texture(xml_element, material.texture)
 
-    def _write_color(self, xml_parent, color):
+    def _write_color(self, xml_parent, color: np.ndarray):
         if color is None:
             return
 
         etree.SubElement(
-            xml_parent, "color", attrib={"rgba": " ".join(map(str, color.rgba))}
+            xml_parent, "color", attrib={"rgba": " ".join(map(str, color))}
         )
 
     def _write_texture(self, xml_parent, texture):
@@ -951,13 +952,13 @@ class URDF:
         # TODO: use texture filename handler
         etree.SubElement(xml_parent, "texture", attrib={"filename": texture.filename})
 
-    def _write_joint(self, xml_parent: etree.Element, joint: Joint):
+    def _write_joint(self, xml_parent: etree.Element, joint: rtb_urdf.Joint):
         xml_element = etree.SubElement(
             xml_parent,
             "joint",
             attrib={
                 "name": joint.name,
-                "type": joint.type,
+                "type": joint.joint_type,
             },
         )
 
@@ -967,9 +968,9 @@ class URDF:
         self._write_axis(xml_element, joint.axis)
         self._write_limit(xml_element, joint.limit)
         self._write_dynamics(xml_element, joint.dynamics)
-        # self._write_mimic(xml_element, joint.mimic)
-        # self._write_calibration(xml_element, joint.calibration)
-        # self._write_safety_controller(xml_element, joint.safety_controller)
+        self._write_mimic(xml_element, joint.mimic)
+        self._write_calibration(xml_element, joint.calibration)
+        self._write_safety_controller(xml_element, joint.safety_controller)
 
     def _write_axis(self, xml_parent, axis):
         if axis is None:
@@ -977,7 +978,7 @@ class URDF:
 
         etree.SubElement(xml_parent, "axis", attrib={"xyz": " ".join(map(str, axis))})
 
-    def _write_limit(self, xml_parent, limit):
+    def _write_limit(self, xml_parent, limit: rtb_urdf.JointLimit):
         if limit is None:
             return
 
@@ -997,7 +998,7 @@ class URDF:
             attrib=attrib,
         )
 
-    def _write_dynamics(self, xml_parent, dynamics):
+    def _write_dynamics(self, xml_parent, dynamics: rtb_urdf.JointDynamics):
         if dynamics is None:
             return
 
@@ -1013,7 +1014,10 @@ class URDF:
             attrib=attrib,
         )
 
-    def _write_mimic(self, xml_parent, mimic):
+    def _write_mimic(self, xml_parent, mimic: rtb_urdf.JointMimic):
+        if mimic is None:
+            return
+
         etree.SubElement(
             xml_parent,
             "mimic",
@@ -1024,7 +1028,10 @@ class URDF:
             },
         )
 
-    def _write_calibration(self, xml_parent, calibration):
+    def _write_calibration(self, xml_parent, calibration: rtb_urdf.JointCalibration):
+        if calibration is None:
+            return
+
         etree.SubElement(
             xml_parent,
             "calibration",
@@ -1034,7 +1041,10 @@ class URDF:
             },
         )
 
-    def _write_safety_controller(self, xml_parent, safety_controller):
+    def _write_safety_controller(self, xml_parent, safety_controller: rtb_urdf.SafetyController):
+        if safety_controller is None:
+            return
+
         etree.SubElement(
             xml_parent,
             "safety_controller",
@@ -1046,7 +1056,7 @@ class URDF:
             },
         )
 
-    def _write_transmission_joint(self, xml_parent, transmission_joint):
+    def _write_transmission_joint(self, xml_parent, transmission_joint: rtb_urdf.TransmissionJoint):
         xml_element = etree.SubElement(
             xml_parent,
             "joint",
@@ -1054,14 +1064,14 @@ class URDF:
                 "name": str(transmission_joint.name),
             },
         )
-        for h in transmission_joint.hardware_interfaces:
+        for h in transmission_joint.hardwareInterfaces:
             tmp = etree.SubElement(
                 xml_element,
                 "hardwareInterface",
             )
             tmp.text = h
 
-    def _write_actuator(self, xml_parent, actuator):
+    def _write_actuator(self, xml_parent, actuator: rtb_urdf.Actuator):
         xml_element = etree.SubElement(
             xml_parent,
             "actuator",
@@ -1069,18 +1079,18 @@ class URDF:
                 "name": str(actuator.name),
             },
         )
-        if actuator.mechanical_reduction is not None:
+        if actuator.mechanicalReduction is not None:
             tmp = etree.SubElement("mechanicalReduction")
-            tmp.text = str(actuator.mechanical_reduction)
+            tmp.text = str(actuator.mechanicalReduction)
 
-        for h in actuator.hardware_interfaces:
+        for h in actuator.hardwareInterfaces:
             tmp = etree.SubElement(
                 xml_element,
                 "hardwareInterface",
             )
             tmp.text = h
 
-    def _write_transmission(self, xml_parent, transmission):
+    def _write_transmission(self, xml_parent, transmission: rtb_urdf.Transmission):
         xml_element = etree.SubElement(
             xml_parent,
             "transmission",

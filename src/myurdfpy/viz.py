@@ -5,7 +5,7 @@ import viser
 import trimesh.transformations as tra
 
 from myurdfpy import URDF
-
+from myurdfpy.urdf_rtb import URDF as URDF_RTB
 
 _logger = logging.getLogger(__name__)
          
@@ -18,7 +18,7 @@ class Visualizer:
         skip_materials: bool = False,
         use_collision_mesh: bool = False
     ):
-        self._urdf_model = URDF.load(
+        self._urdf_model = URDF_RTB.load(
             urdf_file, mesh_dir=mesh_dir, filename_handler=filename_handler, skip_materials=skip_materials)
         self._server = viser.ViserServer()
         self._use_collision_mesh = use_collision_mesh
@@ -86,13 +86,15 @@ class Visualizer:
 
             for joint_name in self._urdf_model.actuated_joint_names:
                 joint = self._urdf_model.joint_map[joint_name]
+                joint_limit_lower = joint.limit.lower if isinstance(self._urdf_model, URDF) else joint.qlim[0]
+                joint_limit_upper = joint.limit.upper if isinstance(self._urdf_model, URDF) else joint.qlim[1]
 
                 slider = self._server.gui.add_slider(
                     joint_name,
-                    min=joint.limit.lower,
-                    max=joint.limit.upper,
+                    min=joint_limit_lower,
+                    max=joint_limit_upper,
                     step=0.01,
-                    initial_value=max(joint.limit.lower, min(joint.limit.upper, 0.))
+                    initial_value=max(joint_limit_lower, min(joint_limit_upper, 0.))
                 )
                 self._slider_handles[joint_name] = slider
 
