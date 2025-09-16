@@ -908,7 +908,7 @@ class URDF:
     # The following methods are used to create trimesh scene #
     ##########################################################
 
-    def _geometry2trimeshscene(self, geometry: Geometry, load_file: bool, force_mesh: bool):
+    def _geometry2trimeshscene(self, geometry: Geometry, link_name: str, load_file: bool, force_mesh: bool):
         new_s = None
         if geometry.box is not None:
             new_s = trimesh.primitives.Box(extents=geometry.box.size).scene()
@@ -920,29 +920,31 @@ class URDF:
             ).scene()
         elif geometry.mesh is not None and load_file:
             new_filename = self._filename_handler(geometry.mesh.filename)
+            new_filename = os.path.abspath(new_filename)
+            new_basename = os.path.basename(new_filename)
 
             if os.path.isfile(new_filename):
-                _logger.debug(f"Loading {geometry.mesh.filename} as {new_filename}")
-
                 if force_mesh:
                     new_g = trimesh.load(new_filename, force="mesh")
 
                     # add original filename
-                    if "file_path" not in new_g.metadata:
-                        new_g.metadata["file_path"] = os.path.abspath(new_filename)
-                        new_g.metadata["file_name"] = os.path.basename(new_filename)
+                    new_g.metadata["file_path"] = new_filename
+                    new_g.metadata["file_name"] = new_basename
+                    new_g.metadata["label"] = f"{link_name}"
 
                     new_s = trimesh.Scene()
                     new_s.add_geometry(new_g)
                 else:
                     new_s = trimesh.load(new_filename, force="scene")
+                    new_s.metadata["file_path"] = new_filename
+                    new_s.metadata["file_name"] = new_basename
 
-                    if "file_path" in new_s.metadata:
-                        for i, (_, geom) in enumerate(new_s.geometry.items()):
-                            if "file_path" not in geom.metadata:
-                                geom.metadata["file_path"] = new_s.metadata["file_path"]
-                                geom.metadata["file_name"] = new_s.metadata["file_name"]
-                                geom.metadata["file_element"] = i
+                    for i, (_, geom) in enumerate(new_s.geometry.items()):
+                        geom.metadata["file_path"] = new_s.metadata["file_path"]
+                        geom.metadata["file_name"] = new_s.metadata["file_name"]
+                        geom.metadata["file_element"] = i
+                        geom.metadata["label"] = f"{link_name}_part{i}"
+
 
                 # scale mesh appropriately
                 if geometry.mesh.scale is not None:
@@ -998,15 +1000,11 @@ class URDF:
             if isinstance(geom.visual, trimesh.visual.ColorVisuals):
                 geom.visual.face_colors[:] = [int(255 * channel) for channel in color.rgba]
 
-        first_geom_name = None
-
         for v in geometries:
             if v.geometry is not None:
-                if first_geom_name is None:
-                    first_geom_name = v.name
-
                 new_s = self._geometry2trimeshscene(
                     geometry=v.geometry,
+                    link_name=link_name,
                     load_file=load_geometry,
                     force_mesh=force_mesh,
                 )
@@ -1026,7 +1024,7 @@ class URDF:
 
                             tmp_scene.add_geometry(
                                 geometry=geom,
-                                geom_name=v.name,
+                                geom_name=geom.metadata["label"],
                                 parent_node_name=link_name,
                                 transform=origin @ T,
                             )
@@ -1043,7 +1041,7 @@ class URDF:
 
                             s.add_geometry(
                                 geometry=geom,
-                                geom_name=v.name,
+                                geom_name=geom.metadata["label"],
                                 parent_node_name=link_name,
                                 transform=origin @ T,
                             )
@@ -1051,7 +1049,7 @@ class URDF:
         if force_single_geometry and len(tmp_scene.geometry) > 0:
             s.add_geometry(
                 geometry=tmp_scene.dump(concatenate=True),
-                geom_name=first_geom_name,
+                geom_name="all_combined_geometry",
                 parent_node_name=link_name,
                 transform=np.eye(4),
             )

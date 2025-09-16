@@ -14,7 +14,7 @@ import roboticstoolbox as rtb
 import roboticstoolbox.tools.urdf as rtb_urdf
 import roboticstoolbox.tools.xacro as rtb_xacro
 
-from myurdfpy.utils import filename_handler_magic, timeit_decorator
+from myurdfpy.utils import filename_handler_magic
 
 _logger = logging.getLogger(__name__)
 
@@ -505,7 +505,7 @@ class URDF:
     # The following methods are used to create trimesh scene #
     ##########################################################
 
-    def _geometry2trimeshscene(self, geometry, load_file: bool, force_mesh: bool):
+    def _geometry2trimeshscene(self, geometry, link_name: str, load_file: bool, force_mesh: bool):
         """Import a single geometry object into a trimesh scene.
 
         Args:
@@ -517,7 +517,7 @@ class URDF:
             trimesh.Scene: A trimesh scene object.
         """
 
-        new_s = None
+        new_s: trimesh.Scene = None
         if isinstance(geometry, sg.Cuboid):
             new_s = trimesh.primitives.Box(extents=geometry.scale).scene()
         elif isinstance(geometry, sg.Sphere):
@@ -528,29 +528,31 @@ class URDF:
             ).scene()
         elif isinstance(geometry, sg.Mesh) and load_file:
             new_filename = self._filename_handler(geometry.filename)
+            new_filename = os.path.abspath(new_filename)
+            new_basename = os.path.basename(new_filename).split(".")[0]
 
             if os.path.isfile(new_filename):
-                _logger.debug(f"Loading {geometry.filename} as {new_filename}")
 
                 if force_mesh:
                     new_g = trimesh.load(new_filename, force="mesh")
 
                     # add original filename
-                    if "file_path" not in new_g.metadata:
-                        new_g.metadata["file_path"] = os.path.abspath(new_filename)
-                        new_g.metadata["file_name"] = os.path.basename(new_filename)
+                    new_g.metadata["file_path"] = new_filename
+                    new_g.metadata["file_name"] = new_basename
+                    new_g.metadata["label"] = f"{link_name}"
 
                     new_s = trimesh.Scene()
                     new_s.add_geometry(new_g)
                 else:
                     new_s = trimesh.load(new_filename, force="scene")
-
-                    if "file_path" in new_s.metadata:
-                        for i, (_, geom) in enumerate(new_s.geometry.items()):
-                            if "file_path" not in geom.metadata:
-                                geom.metadata["file_path"] = new_s.metadata["file_path"]
-                                geom.metadata["file_name"] = new_s.metadata["file_name"]
-                                geom.metadata["file_element"] = i
+                    new_s.metadata["file_path"] = new_filename
+                    new_s.metadata["file_name"] = new_basename
+                    
+                    for i, (old_name, geom) in enumerate(new_s.geometry.items()):
+                        geom.metadata["label"] = f"{link_name}_part{i}"
+                        geom.metadata["file_path"] = new_filename
+                        geom.metadata["file_name"] = new_basename
+                        geom.metadata["file_element"] = i
 
                 # scale mesh appropriately
                 if geometry.scale is not None:
@@ -610,11 +612,10 @@ class URDF:
             if isinstance(geom.visual, trimesh.visual.ColorVisuals):
                 geom.visual.face_colors[:] = [int(255 * channel) for channel in color.rgba]
 
-        first_geom_name = None
-
         for g in geometries:
             new_s = self._geometry2trimeshscene(
                 geometry=g,
+                link_name=link_name,
                 load_file=load_geometry,
                 force_mesh=force_mesh,
             )
@@ -626,15 +627,9 @@ class URDF:
                         T, geom_name = new_s.graph.get(name)
                         geom = new_s.geometry[geom_name]
 
-                        # if isinstance(v, Visual):
-                        #     if skip_materials:
-                        #         geom.visual = trimesh.visual.ColorVisuals(geom) # remove color information
-                        #     else:
-                        #         apply_visual_color(geom, v, self._material_map)
-
                         tmp_scene.add_geometry(
                             geometry=geom,
-                            geom_name=geom_name,
+                            geom_name=geom.metadata["label"],
                             parent_node_name=link_name,
                             transform=origin @ T,
                         )
@@ -643,15 +638,9 @@ class URDF:
                         T, geom_name = new_s.graph.get(name)
                         geom = new_s.geometry[geom_name]
 
-                        # if isinstance(v, Visual):
-                        #     if skip_materials:
-                        #         geom.visual = trimesh.visual.ColorVisuals(geom) # remove color information
-                        #     else:
-                        #         apply_visual_color(geom, v, self._material_map)
-
                         s.add_geometry(
                             geometry=geom,
-                            geom_name=geom_name,
+                            geom_name=geom.metadata["label"],
                             parent_node_name=link_name,
                             transform=origin @ T,
                         )
@@ -659,7 +648,7 @@ class URDF:
         if force_single_geometry and len(tmp_scene.geometry) > 0:
             s.add_geometry(
                 geometry=tmp_scene.dump(concatenate=True),
-                geom_name=first_geom_name,
+                geom_name="all_combined_geometry",
                 parent_node_name=link_name,
                 transform=np.eye(4),
             )

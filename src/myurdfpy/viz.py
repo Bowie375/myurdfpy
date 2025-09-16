@@ -18,7 +18,7 @@ class Visualizer:
         skip_materials: bool = False,
         use_collision_mesh: bool = False
     ):
-        self._urdf_model = URDF_RTB.load(
+        self._urdf_model = URDF.load(
             urdf_file, mesh_dir=mesh_dir, filename_handler=filename_handler, skip_materials=skip_materials)
         self._server = viser.ViserServer()
         self._use_collision_mesh = use_collision_mesh
@@ -26,8 +26,11 @@ class Visualizer:
         self._mesh_handles: dict[str, viser.MeshHandle] = {}
         self._frame_handles: dict[str, viser.FrameHandle] = {}
         self._slider_handles: dict[str, viser.GuiSliderHandle] = {}
+        self._folder_handles: dict[str, viser.GuiFolderHandle] = {}
 
     def _add_mesh(self):
+        """Add meshes to viser scene"""
+
         scene = self._urdf_model.collision_scene if self._use_collision_mesh else self._urdf_model.scene
 
         for i, geometry_name in enumerate(scene.geometry):
@@ -55,8 +58,9 @@ class Visualizer:
             self._frame_handles[geometry_name] = handle
 
     def _add_joint_control(self):
+        """Add joint control sliders and reset button"""
 
-        def callback(e: viser.GuiEvent, joint_name: str = None, cfg: dict|list[float] = None):
+        def set_joint_value(e: viser.GuiEvent, joint_name: str = None, cfg: dict|list[float] = None):
             if joint_name is not None:
                 self._urdf_model.update_cfg({joint_name: e.target.value})
             else:
@@ -82,8 +86,14 @@ class Visualizer:
                     for joint_name, value in zip(self._urdf_model.actuated_joint_names, cfg):
                         self._slider_handles[joint_name].value = value
 
-        with self._server.gui.add_folder("Controls"):
+        # text show link name
+        with self._server.gui.add_folder("Link Name") as folder:
+            self._folder_handles["Link Name"] = folder
+            self._text_handle = self._server.gui.add_markdown("None")
 
+        # sliders control joint values
+        with self._server.gui.add_folder("Controls") as folder:
+            self._folder_handles["Controls"] = folder
             for joint_name in self._urdf_model.actuated_joint_names:
                 joint = self._urdf_model.joint_map[joint_name]
                 joint_limit_lower = joint.limit.lower if isinstance(self._urdf_model, URDF) else joint.qlim[0]
@@ -98,11 +108,14 @@ class Visualizer:
                 )
                 self._slider_handles[joint_name] = slider
 
-                slider.on_update(partial(callback, joint_name=joint_name))
+                slider.on_update(partial(set_joint_value, joint_name=joint_name))
 
-            self._server.gui.add_button("Reset").on_click(partial(callback, cfg=self._urdf_model.zero_cfg))
+            self._server.gui.add_button("Reset Joint Values").on_click(
+                partial(set_joint_value, cfg=self._urdf_model.zero_cfg))
 
     def _add_link_click(self):
+        """Add click event to each mesh to toggle visibility of frame and text"""
+
         for geometry_name, handle in self._mesh_handles.items():
             
             def make_callback(geometry_name):
@@ -110,9 +123,20 @@ class Visualizer:
                     # handle.mesh.visual.face_colors[:] = [1.0, 0.0, 0.0, 1.0]
                     v = self._frame_handles[geometry_name].visible
                     self._frame_handles[geometry_name].visible = not v
+                    self._text_handle.content = geometry_name
                 return callback
 
             handle.on_click(make_callback(geometry_name))
+
+        def reset_frames(event: viser.GuiEvent):
+            for h in self._frame_handles.values():
+                h.visible = False
+
+        with self._folder_handles["Controls"]:
+            self._server.gui.add_button("Reset Frames").on_click(reset_frames)
+
+    def _add_link_hover(self):
+        pass
 
     def run(self):
         self._add_mesh()
