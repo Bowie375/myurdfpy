@@ -1,4 +1,6 @@
 import os
+import timeit
+import functools
 from functools import partial
 
 import pydantic
@@ -8,7 +10,6 @@ import numpy as np
 #################################
 #     utils for exportation     #
 #################################
-
 
 def dump_cfg(path: str, obj: omegaconf.DictConfig):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -48,9 +49,9 @@ def array_eq(arr1, arr2, tolerance=1e-8):
 def scalar_eq(scalar1, scalar2, tolerance=1e-8):
     return np.isclose(scalar1, scalar2, atol=tolerance)
 
-####################################
-#    utils for filename handling   #
-####################################
+#####################################
+#    utils for filename handling    #
+#####################################
 
 def filename_handler_ignore_directive(fname):
     """A filename handler that removes anything before (and including) '://'.
@@ -139,3 +140,24 @@ def filename_handler_magic(fname, dir):
         ]
         + create_filename_handlers_relative_to_urdf_file(urdf_dir=dir),
     )
+
+##########################
+#    utils for timing    #
+##########################
+def timeit_decorator(number=1, repeat=1):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+
+            # run timeit on this callable 'number' times, record total time;
+            # repeat this process 'repeat' times and take the average time
+            timer = timeit.Timer(lambda: func(*args, **kwargs))
+            times = timer.repeat(repeat=repeat, number=number)
+
+            avg_time = sum(times) / len(times)
+            print(f"{func.__name__} total time for {number} runs (averaged over {repeat} trys): {avg_time:.6f} sec")
+
+            # actually run the function once to return its result
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator

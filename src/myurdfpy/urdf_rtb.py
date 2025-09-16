@@ -2,7 +2,7 @@ import os
 import logging
 from functools import partial
 from dataclasses import is_dataclass
-from typing import Union
+from typing import Union, Literal, Tuple
 
 import six
 import numpy as np
@@ -14,7 +14,7 @@ import roboticstoolbox as rtb
 import roboticstoolbox.tools.urdf as rtb_urdf
 import roboticstoolbox.tools.xacro as rtb_xacro
 
-from myurdfpy.utils import filename_handler_magic
+from myurdfpy.utils import filename_handler_magic, timeit_decorator
 
 _logger = logging.getLogger(__name__)
 
@@ -280,7 +280,7 @@ class URDF:
         return self._scene_collision
 
     @property
-    def link_map(self) -> dict:
+    def link_map(self) -> dict[str, rtb.Link]:
         """A dictionary mapping link names to link objects.
 
         Returns:
@@ -289,7 +289,7 @@ class URDF:
         return self._link_map
 
     @property
-    def joint_map(self) -> dict:
+    def joint_map(self) -> dict[str, rtb.Link]:
         """A dictionary mapping joint names to joint objects.
 
         Returns:
@@ -697,7 +697,7 @@ class URDF:
     # The following methods are used for computing forward and inverse kinematics #
     ###############################################################################
 
-    def update_cfg(self, configuration):
+    def update_cfg(self, configuration) -> list[np.ndarray]:
         """Update joint configuration of URDF; does forward kinematics.
 
         Args:
@@ -706,6 +706,11 @@ class URDF:
         Raises:
             ValueError: Raised if dimensionality of configuration does not match number of actuated joints of URDF model.
             TypeError: Raised if configuration is neither a dict, list, tuple or np.ndarray.
+
+        Returns:
+            list[np.ndarray]: A list of poses for base frame and each link in the URDF model.
+            Total length of the list is (1 + n). The first entry in the list if base frame pose,
+            the link.number entry in list is the pose for that link.
         """
         joint_cfg = self.robot.q.copy()
 
@@ -737,13 +742,151 @@ class URDF:
             for name, link in self.link_map.items():
                 self._scene_collision.graph.update(name, matrix=T[link.number])
 
+        return T
 
-    def IK(self, frame_to, frame_from=None, target=None, q0=None, **kwargs):
+    def IK(
+        self, 
+        pose: np.ndarray,
+        end: Union[str, rtb.Link, rtb.Gripper],
+        start: Union[str, rtb.Link, rtb.Gripper, None] = None,
+        q0: Union[np.ndarray, None] = None,
+        delta_thresh: float = None,
+        max_iter: int = 30,
+        max_search: int = 100,
+        tol: float = 1e-6,
+        mask: Union[np.ndarray, None] = None,
+        joint_limits: bool = True,
+        name: Literal["GN", "LM", "NR"] = "LM",
+        pinv: bool = True,
+        pinv_damping: float = 0.01,
+        k: float = 1.0,
+        method: Literal["chan", "wampler", "sugihara"] = "chan",
+    ) -> Tuple[np.ndarray, int, int, int, float]:
         """Compute the inverse kinematics for a given frame_to and target position.
+
+        Args:
+        -----
+            pose (np.ndarray) 
+                The desired pose for the designated end link.
+            end (union[str, rtb.Link, rtb.Gripper])
+                the link considered as the end-effector
+            **start (union[str, rtb.Link, rtb.Gripper, None])
+                the link considered as the base frame, defaults to the robots's base frame
+            **q0 (np.ndarray)
+                The initial joint coordinate vector. Provide the cfg for all joints or only
+                provide joint values from start to end, an error will be raised otherwise.
+            **delta_thresh (float)
+                Threshold for joint position change when q0 is provided.
+                This is used to constrain the solution to be close to the initial qpos.
+            **max_iter (int)
+                How many iterations are allowed within a search before a new search
+            **max_search (int)
+                How many searches are allowed before being deemed unsuccessfull
+            **tol (float)
+                Maximum allowed residual error E
+            **mask (np.ndarray)
+                A 6D vector which assigns weights to Cartesian degrees-of-freedom
+                error priority
+            **joint_limits (bool)
+                Reject solutions with joint limit violations
+            **name (literal["GN", "LM", "NR"]):
+                Name of the numerical IK method to use. Defaults to "LM"
+            **pinv (bool)
+                Used in "GN" and "NR". Use the psuedo-inverse instad of the normal matrix inverse.
+                This arg must be set to True for redundant robots (>6 DoF).
+            **pinv_damping (float)
+                Used in "GN" and "NR". Damping factor for the psuedo-inverse
+            **k (float)
+                Used only in "LM". Sets the gain value for the damping matrix Wn in the next iteration.
+            **method: literal["chan", "wampler", "sugihara"]
+                Used only in "LM". One of "chan", "sugihara" or "wampler". Defines which method is used
+                to calculate the damping matrix Wn in the ``step`` method. Default to "chan"
+        
+        Returns
+        -------
+            sol
+                tuple (q, success, iterations, searches, residual)
+
+            The return value ``sol`` is a tuple with elements:
+
+            ============    ==========  ===============================================
+            Element         Type        Description
+            ============    ==========  ===============================================
+            ``q``           ndarray(n)  joint coordinates in units of radians or metres
+            ``success``     int         whether a solution was found
+            ``iterations``  int         total number of iterations
+            ``searches``    int         total number of searches
+            ``residual``    float       final value of cost function
+            ============    ==========  ===============================================
+
+            If ``success == 0`` the ``q`` values will be valid numbers, but the
+            solution will be in error.  The amount of error is indicated by
+            the ``residual``.
         """
 
-        self.robot.ik_GN
+        # First: examine the validity of q0
+        start_link = self.base_link if start is None else start
+        end_link = self.link_map[end] if isinstance(end, str) else end
+        middle_links = [end_link]
+        while end_link.parent.name != start_link.name:
+            middle_links.append(end_link.parent)
+            end_link = end_link.parent
+            if end_link is None:
+                raise ValueError("End link is not a child of start link")
+        middle_links = [j for j in middle_links if j.isjoint][::-1]
 
+        if q0 is not None:
+            if len(q0) == self.num_dofs:
+                tmp_q = []
+                for joint in middle_links:
+                    tmp_q.append(q0[joint.jindex]) 
+                q0 = np.array(tmp_q)
+            elif len(q0) == len(middle_links):
+                q0 = np.array(q0)
+            else:
+                raise ValueError("q0 has wrong dimensionalitys")
+
+        # Second: setup IK function and kwargss
+        if name == "GN":
+            func = self.robot.ik_GN
+            kwargs = dict(pinv=pinv, pinv_damping=pinv_damping)
+        elif name == "LM":
+            func = self.robot.ik_LM
+            kwargs = dict(k=k, method=method)
+        elif name == "NR":
+            func = self.robot.ik_NR
+            kwargs = dict(pinv=pinv, pinv_damping=pinv_damping)
+        else:
+            raise ValueError(f"Invalid IK name {name}")
+
+        # Third: run IK loop
+        s = max_search
+        sol = None
+
+        while s > 0:
+            q, success, iterations, searches, residual = func(
+                Tep=pose, 
+                end=end,
+                start=start, 
+                q0=q0, 
+                ilimit=max_iter,
+                slimit=s, 
+                tol=tol, 
+                mask=mask, 
+                joint_limits=joint_limits,
+                **kwargs
+            )
+            
+            s -= searches
+            sol = (q, success, iterations, searches, residual) if sol is None or residual < sol[4] else sol
+
+            if success:
+                if q0 is not None and delta_thresh is not None and np.linalg.norm(q - q0) > delta_thresh:
+                    continue
+
+                return q, success, iterations, searches, residual
+
+        return (sol[0], 0, sol[2], sol[3], sol[4]) # IK failed, return best solution
 
     ###########################################
     # The following part is for XML exporting #
