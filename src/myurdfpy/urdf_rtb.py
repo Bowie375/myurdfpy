@@ -204,10 +204,10 @@ class URDF:
             **load_meshes (bool, optional): Whether to load the meshes referenced in the <mesh> elements. Defaults to True.
             **filename_handler (callable, optional): A function that takes a file name and returns a valid file path. This can be used to modify the file names of <mesh> elements. If None, a default handler that makes the file names relative to mesh_dir is used. Defaults to None.
             **load_collision_meshes (bool, optional): Whether to load the collision meshes referenced in the <mesh> elements. Defaults to False.
-            force_mesh (bool, optional): Each obj file will be loaded with 'force=mesh', setting this to false will use 'force=scene' instead. This might loose texture information but the resulting scene graph will be smaller. Defaults to True.
-            force_collision_mesh (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
-            force_single_part (bool, optional): Each loaded obj file in a single link will be concatenated into a single one (instead of being turned into a graph; in case the underlying file contains multiple geometries). This might loose texture information but the resulting scene graph will be smaller. Defaults to True.
-            force_collison_single_part (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
+            **force_mesh (bool, optional): Each obj file will be loaded with 'force=mesh', setting this to false will use 'force=scene' instead. This might loose texture information but the resulting scene graph will be smaller. Defaults to True.
+            **force_collision_mesh (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
+            **force_single_part (bool, optional): Each loaded obj file in a single link will be concatenated into a single one (instead of being turned into a graph; in case the underlying file contains multiple geometries). This might loose texture information but the resulting scene graph will be smaller. Defaults to True.
+            **force_collison_single_part (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
          Raises:
             ValueError: If filename does not exist or gripper link specified with invalid index or name.
 
@@ -499,7 +499,7 @@ class URDF:
         else:
             return
         
-        if color is not None:
+        if color is not None and isinstance(mesh.visual, trimesh.visual.ColorVisuals):
             mesh.visual.face_colors[:] = [int(255 * channel) for channel in color]
 
 

@@ -17,7 +17,7 @@ class Visualizer:
         filename_handler: callable = None,
         use_collision_mesh: bool = False
     ):
-        self._urdf_model = URDF_RTB.load(
+        self._urdf_model = URDF.load(
             urdf_file, mesh_dir=mesh_dir, filename_handler=filename_handler)
         self._server = viser.ViserServer()
         self._use_collision_mesh = use_collision_mesh
