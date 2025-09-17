@@ -475,9 +475,9 @@ class URDF:
             self._link_map[link.name] = link
 
     def _update_actuated_joints(self):
-        self._actuated_joints = []
-        self._actuated_joint_indices = []
-        self._actuated_dof_indices = []
+        self._actuated_joints: list[Joint] = []
+        self._actuated_joint_indices: list[int] = []
+        self._actuated_dof_indices: list[list[int]] = []
 
         dof_indices_cnt = 0
         for i, j in enumerate(self.robot.joints):

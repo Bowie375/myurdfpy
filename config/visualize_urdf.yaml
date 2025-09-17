@@ -32,7 +32,7 @@ disable_loggers: []
 urdf:
   urdf_file: null
   mesh_dir: null
-  skip_materials: false
+  # skip_materials: false
 
 visualize:
   use_collision_mesh: false

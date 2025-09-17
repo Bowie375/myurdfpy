@@ -15,11 +15,10 @@ class Visualizer:
         urdf_file: str, 
         mesh_dir: str = "",
         filename_handler: callable = None,
-        skip_materials: bool = False,
         use_collision_mesh: bool = False
     ):
-        self._urdf_model = URDF.load(
-            urdf_file, mesh_dir=mesh_dir, filename_handler=filename_handler, skip_materials=skip_materials)
+        self._urdf_model = URDF_RTB.load(
+            urdf_file, mesh_dir=mesh_dir, filename_handler=filename_handler)
         self._server = viser.ViserServer()
         self._use_collision_mesh = use_collision_mesh
 

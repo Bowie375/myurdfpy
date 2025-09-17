@@ -1,7 +1,6 @@
 import os
 import logging
 from functools import partial
-from dataclasses import is_dataclass
 from typing import Union, Literal, Tuple
 
 import six
@@ -13,6 +12,7 @@ import spatialgeometry as sg
 import roboticstoolbox as rtb
 import roboticstoolbox.tools.urdf as rtb_urdf
 import roboticstoolbox.tools.xacro as rtb_xacro
+from roboticstoolbox.tools.urdf.urdf import Material as rtb_urdf_Material
 
 from myurdfpy.utils import filename_handler_magic
 
@@ -84,7 +84,8 @@ class URDF:
         load_collision_meshes: bool = True,
         force_mesh: bool = False,
         force_collision_mesh: bool = True,
-        skip_materials: bool = False,
+        force_single_part: bool = False,
+        force_collison_single_part: bool = False,
     ):
         """A URDF model.
 
@@ -97,9 +98,10 @@ class URDF:
             filename_handler (callable, optional): A function that takes a file name and returns a valid file path. This can be used to modify the file names of <mesh> elements. If None, a default handler that makes the file names relative to mesh_dir is used. Defaults to None.
             load_meshes (bool, optional): Whether to load the meshes referenced in the <mesh> elements. Defaults to True.
             load_collision_meshes (bool, optional): Whether to load the collision meshes referenced in the <mesh> elements. Defaults to False.
-            force_mesh (bool, optional): Each loaded geometry will be concatenated into a single one (instead of being turned into a graph; in case the underlying file contains multiple geometries). This might loose texture information but the resulting scene graph will be smaller. Defaults to True.
+            force_mesh (bool, optional): Each obj file will be loaded with 'force=mesh', setting this to false will use 'force=scene' instead. This might loose texture information but the resulting scene graph will be smaller. Defaults to True.
             force_collision_mesh (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
-            skip_materials (bool, optional): Materials will not be loaded. Defaults to False.
+            force_single_part (bool, optional): Each loaded obj file in a single link will be concatenated into a single one (instead of being turned into a graph; in case the underlying file contains multiple geometries). This might loose texture information but the resulting scene graph will be smaller. Defaults to True.
+            force_collison_single_part (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
         """
         if filename_handler is None:
             self._filename_handler = partial(filename_handler_magic, dir=mesh_dir)
@@ -123,8 +125,7 @@ class URDF:
                 use_collision_geometry=False,
                 load_geometry=load_meshes,
                 force_mesh=force_mesh,
-                force_single_geometry_per_link=skip_materials or force_mesh,
-                skip_materials=skip_materials,
+                force_single_part=force_single_part,
             )
         else:
             self._scene = None
@@ -134,8 +135,7 @@ class URDF:
                 use_collision_geometry=True,
                 load_geometry=load_collision_meshes,
                 force_mesh=force_collision_mesh,
-                force_single_geometry_per_link=force_collision_mesh,
-                skip_materials=True,
+                force_single_part=force_collison_single_part,
             )
         else:
             self._scene_collision = None
@@ -152,10 +152,23 @@ class URDF:
     def _create_maps(self):
         self._joint_map: dict[str, rtb.Link] = {}
         self._link_map: dict[str, rtb.Link] = {}
+        self._name_material_map: dict[str, rtb_urdf_Material] = {}
+        self._node_material_map: dict[sg.SceneNode, rtb_urdf_Material] = {}
+
+        urdf_link_map: dict[str, rtb_urdf.Link] = {link.name: link for link in self.urdf.links}
+
         for link in self.robot.links:
             self._link_map[link.name] = link
             if link.isjoint:
                 self._joint_map[link.name] = link
+
+            for i, geom in enumerate(link.geometry):
+                material: Union[rtb_urdf_Material, None] = urdf_link_map[link.name].visuals[i].material
+                if material is None:
+                    continue
+                if material.name is not None and material.name not in self._name_material_map:
+                    self._name_material_map[material.name] = material
+                self._node_material_map[geom] = material
 
     def _update_actuated_joints(self):
         """
@@ -191,10 +204,11 @@ class URDF:
             **load_meshes (bool, optional): Whether to load the meshes referenced in the <mesh> elements. Defaults to True.
             **filename_handler (callable, optional): A function that takes a file name and returns a valid file path. This can be used to modify the file names of <mesh> elements. If None, a default handler that makes the file names relative to mesh_dir is used. Defaults to None.
             **load_collision_meshes (bool, optional): Whether to load the collision meshes referenced in the <mesh> elements. Defaults to False.
-            **force_mesh (bool, optional): Each loaded geometry will be concatenated into a single one (instead of being turned into a graph; in case the underlying file contains multiple geometries). This might loose texture information but the resulting scene graph will be smaller. Defaults to False.
-            **force_collision_mesh (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
-            **skip_materials (bool, optional): Materials will not be loaded. Defaults to False.
-        Raises:
+            force_mesh (bool, optional): Each obj file will be loaded with 'force=mesh', setting this to false will use 'force=scene' instead. This might loose texture information but the resulting scene graph will be smaller. Defaults to True.
+            force_collision_mesh (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
+            force_single_part (bool, optional): Each loaded obj file in a single link will be concatenated into a single one (instead of being turned into a graph; in case the underlying file contains multiple geometries). This might loose texture information but the resulting scene graph will be smaller. Defaults to True.
+            force_collison_single_part (bool, optional): Same as force_mesh, but for collision scene. Defaults to True.
+         Raises:
             ValueError: If filename does not exist or gripper link specified with invalid index or name.
 
         Returns:
@@ -433,41 +447,6 @@ class URDF:
     # The following methods are used to inspect into the URDF #
     ###########################################################
 
-    def contains(self, key, value, element=None) -> bool:
-        """Checks recursively whether the URDF tree contains the provided key-value pair.
-
-        Args:
-            key (str): A key.
-            value (str): A value.
-            element (etree.Element, optional): The XML element from which to start the recursive search. None means URDF root. Defaults to None.
-
-        Returns:
-            bool: Whether the key-value pair was found.
-        """
-        if element is None:
-            element = self.robot
-
-        result = False
-        for fld in element.__dataclass_fields__:
-            field_value = getattr(element, fld)
-            if is_dataclass(field_value):
-                result = result or self.contains(
-                    key=key, value=value, element=field_value
-                )
-            elif (
-                isinstance(field_value, list)
-                and len(field_value) > 0
-                and is_dataclass(field_value[0])
-            ):
-                for field_value_element in field_value:
-                    result = result or self.contains(
-                        key=key, value=value, element=field_value_element
-                    )
-            else:
-                if key == fld and value == field_value:
-                    result = True
-        return result
-
     def get_transform(self, frame_to, frame_from=None, collision_geometry=False):
         """Get the transform from one frame to another.
 
@@ -488,28 +467,48 @@ class URDF:
                     "No collision scene available. Use build_collision_scene_graph=True during loading."
                 )
             else:
-                return self._scene_collision.graph.get(
-                    frame_to=frame_to, frame_from=frame_from
-                )[0]
+                return self._scene_collision.graph.get(frame_to=frame_to, frame_from=frame_from)[0]
         else:
             if self._scene is None:
                 raise ValueError(
                     "No scene available. Use build_scene_graph=True during loading."
                 )
             else:
-                return self._scene.graph.get(frame_to=frame_to, frame_from=frame_from)[
-                    0
-                ]
+                return self._scene.graph.get(frame_to=frame_to, frame_from=frame_from)[0]
 
     ##########################################################
     # The following methods are used to create trimesh scene #
     ##########################################################
 
-    def _geometry2trimeshscene(self, geometry, link_name: str, load_file: bool, force_mesh: bool):
-        """Import a single geometry object into a trimesh scene.
+    def apply_visual_color(self, mesh: trimesh.Trimesh, geometry: sg.SceneNode) -> None:
+        """Apply the color of the visual material to the mesh.
+
+        Args:
+            mesh: Trimesh to color.
+            geometry: The geometry node to get the material from. 'mesh' belongs to this geometry.
+        """
+
+        material: rtb_urdf_Material = self._node_material_map.get(geometry, None)
+        if material is None:
+            return
+
+        if material.color is not None:
+            color = material.color
+        elif material.name is not None and material.name in self._name_material_map:
+            color = self._name_material_map[material.name].color
+        else:
+            return
+        
+        if color is not None:
+            mesh.visual.face_colors[:] = [int(255 * channel) for channel in color]
+
+
+    def _geometry2trimeshscene(self, geometry, part_name: str, load_file: bool, force_mesh: bool):
+        """Load the obj file of a link part with name part_name and return a trimesh scene object.
 
         Args:
             geometry (sg.Geometry): A geometry object.
+            part_name (str): Name of the part.
             load_file (bool): Whether to load the geometry file.
             force_mesh (bool): Whether to force the geometry to be a single mesh.
 
@@ -539,8 +538,9 @@ class URDF:
                     # add original filename
                     new_g.metadata["file_path"] = new_filename
                     new_g.metadata["file_name"] = new_basename
-                    new_g.metadata["label"] = f"{link_name}"
-
+                    new_g.metadata["label"] = f"{part_name}"
+                    
+                    self.apply_visual_color(new_g, geometry)
                     new_s = trimesh.Scene()
                     new_s.add_geometry(new_g)
                 else:
@@ -549,10 +549,11 @@ class URDF:
                     new_s.metadata["file_name"] = new_basename
                     
                     for i, (old_name, geom) in enumerate(new_s.geometry.items()):
-                        geom.metadata["label"] = f"{link_name}_part{i}"
+                        geom.metadata["label"] = f"{part_name}_geom{i}"
                         geom.metadata["file_path"] = new_filename
                         geom.metadata["file_name"] = new_basename
                         geom.metadata["file_element"] = i
+                        self.apply_visual_color(geom, geometry)
 
                 # scale mesh appropriately
                 if geometry.scale is not None:
@@ -566,6 +567,7 @@ class URDF:
                         )
             else:
                 _logger.warning(f"Can't find {new_filename}")
+
         return new_s
 
     def _add_geometries_to_scene(
@@ -575,80 +577,40 @@ class URDF:
         link_name: str,
         load_geometry: bool,
         force_mesh: bool,
-        force_single_geometry: bool,
-        skip_materials: bool,
+        force_single_part: bool,
     ):
         """
-        Add all geometries on a Link to a trimesh scene.
+        Add all obj files of a Link to a trimesh scene.
         """
 
-        if force_single_geometry:
+        if force_single_part:
             tmp_scene = trimesh.Scene(base_frame=link_name)
 
-        def apply_visual_color(
-            geom: trimesh.Trimesh,
-            visual,
-            material_map: dict,
-        ) -> None:
-            """Apply the color of the visual material to the mesh.
-
-            Args:
-                geom: Trimesh to color.
-                visual: Visual description from XML.
-                material_map: Dictionary mapping material names to their definitions.
-            """
-            if visual.material is None:
-                return
-
-            if visual.material.color is not None:
-                color = visual.material.color
-            elif visual.material.name is not None and visual.material.name in material_map:
-                color = material_map[visual.material.name].color
-            else:
-                return
-
-            if color is None:
-                return
-            if isinstance(geom.visual, trimesh.visual.ColorVisuals):
-                geom.visual.face_colors[:] = [int(255 * channel) for channel in color.rgba]
-
-        for g in geometries:
+        for i, g in enumerate(geometries):
             new_s = self._geometry2trimeshscene(
                 geometry=g,
-                link_name=link_name,
+                part_name=f"{link_name}_part{i}",
                 load_file=load_geometry,
                 force_mesh=force_mesh,
             )
             if new_s is not None:
                 origin = g._wT if g._wT is not None else np.eye(4)
+                target_scene = tmp_scene if force_single_part else s
 
-                if force_single_geometry:
-                    for name in new_s.graph.nodes_geometry:
-                        T, geom_name = new_s.graph.get(name)
-                        geom = new_s.geometry[geom_name]
+                for name in new_s.graph.nodes_geometry:
+                    T, geom_name = new_s.graph.get(name)
+                    geom = new_s.geometry[geom_name]
+                    target_scene.add_geometry(
+                        geometry=geom,
+                        geom_name=geom.metadata["label"],
+                        parent_node_name=link_name,
+                        transform=origin @ T,
+                    )
 
-                        tmp_scene.add_geometry(
-                            geometry=geom,
-                            geom_name=geom.metadata["label"],
-                            parent_node_name=link_name,
-                            transform=origin @ T,
-                        )
-                else:
-                    for name in new_s.graph.nodes_geometry:
-                        T, geom_name = new_s.graph.get(name)
-                        geom = new_s.geometry[geom_name]
-
-                        s.add_geometry(
-                            geometry=geom,
-                            geom_name=geom.metadata["label"],
-                            parent_node_name=link_name,
-                            transform=origin @ T,
-                        )
-
-        if force_single_geometry and len(tmp_scene.geometry) > 0:
+        if force_single_part and len(tmp_scene.geometry) > 0:
             s.add_geometry(
                 geometry=tmp_scene.dump(concatenate=True),
-                geom_name="all_combined_geometry",
+                geom_name=f"{link_name}_combined_part",
                 parent_node_name=link_name,
                 transform=np.eye(4),
             )
@@ -658,8 +620,7 @@ class URDF:
         use_collision_geometry: bool = False,
         load_geometry: bool = True,
         force_mesh: bool = False,
-        force_single_geometry_per_link: bool = False,
-        skip_materials: bool = False,
+        force_single_part: bool = False,
     ):
         s = trimesh.Scene(base_frame=self._base_link)
 
@@ -675,8 +636,7 @@ class URDF:
                 link_name=link.name,
                 load_geometry=load_geometry,
                 force_mesh=force_mesh,
-                force_single_geometry=force_single_geometry_per_link,
-                skip_materials=skip_materials,
+                force_single_part=force_single_part,
             )
 
         return s
@@ -1055,7 +1015,7 @@ class URDF:
             else:
                 xml_parent.set("scale", " ".join(map(str, scale)))
 
-    def _write_material(self, xml_parent, material):
+    def _write_material(self, xml_parent, material: rtb_urdf_Material):
         if material is None:
             return
 
