@@ -6,6 +6,15 @@
         "array": "cpp",
         "string": "cpp",
         "string_view": "cpp",
-        "random": "cpp"
+        "random": "cpp",
+        "dense": "cpp",
+        "iostream": "cpp",
+        "cmath": "cpp",
+        "complex": "cpp",
+        "core": "cpp",
+        "initializer_list": "cpp",
+        "utility": "cpp",
+        "numbers": "cpp",
+        "qr": "cpp"
     }
 }
