@@ -5,10 +5,11 @@
 #include "structs.h"
 
 #include <Python.h>
-#include <math.h>
-#include <iostream>
 #include <Eigen/Dense>
 #include <Eigen/QR>
+
+#include <math.h>
+#include <iostream>
 
 extern "C"
 {
@@ -33,83 +34,6 @@ extern "C"
 
     void _ETS_jacob0(ETS *ets, double *q, double *tool, MapMatrixJc &eJ)
     {
-        // ET *et;
-        // double T[16];
-        // MapMatrix4dc eT(T);
-        // Matrix4dc U;
-        // Matrix4dc invU;
-        // Matrix4dc temp;
-        // Matrix4dc ret;
-
-        // int j = 0;
-
-        // U = Eigen::Matrix4d::Identity();
-
-        // // Get the forward  kinematics into T
-        // _ETS_fkine(ets, q, (double *)NULL, tool, eT);
-
-        // for (int i = 0; i < ets->m; i++)
-        // {
-        //     et = ets->ets[i];
-
-        //     if (et->isjoint)
-        //     {
-        //         _ET_T(et, &ret(0), q[et->jindex]);
-        //         temp = U * ret;
-        //         U = temp;
-
-        //         if (i == ets->m - 1 && tool != NULL)
-        //         {
-        //             MapMatrix4dc e_tool(tool);
-        //             temp = U * e_tool;
-        //             U = temp;
-        //         }
-
-        //         _inv(&U(0), &invU(0));
-        //         temp = invU * eT;
-
-        //         if (et->axis == 0)
-        //         {
-        //             eJ(Eigen::seq(0, 2), j) = U(Eigen::seq(0, 2), 2) * temp(1, 3) - U(Eigen::seq(0, 2), 1) * temp(2, 3);
-
-        //             eJ(Eigen::seq(3, 5), j) = U(Eigen::seq(0, 2), 0);
-        //         }
-        //         else if (et->axis == 1)
-        //         {
-        //             eJ(Eigen::seq(0, 2), j) = U(Eigen::seq(0, 2), 0) * temp(2, 3) - U(Eigen::seq(0, 2), 2) * temp(0, 3);
-        //             eJ(Eigen::seq(3, 5), j) = U(Eigen::seq(0, 2), 1);
-        //         }
-        //         else if (et->axis == 2)
-        //         {
-        //             eJ(Eigen::seq(0, 2), j) = U(Eigen::seq(0, 2), 1) * temp(0, 3) - U(Eigen::seq(0, 2), 0) * temp(1, 3);
-        //             eJ(Eigen::seq(3, 5), j) = U(Eigen::seq(0, 2), 2);
-        //         }
-        //         else if (et->axis == 3)
-        //         {
-        //             eJ(Eigen::seq(0, 2), j) = U(Eigen::seq(0, 2), 0);
-        //             eJ(Eigen::seq(3, 5), j) = Eigen::Vector3d::Zero();
-        //         }
-        //         else if (et->axis == 4)
-        //         {
-        //             eJ(Eigen::seq(0, 2), j) = U(Eigen::seq(0, 2), 1);
-        //             eJ(Eigen::seq(3, 5), j) = Eigen::Vector3d::Zero();
-        //         }
-        //         else if (et->axis == 5)
-        //         {
-        //             eJ(Eigen::seq(0, 2), j) = U(Eigen::seq(0, 2), 2);
-        //             eJ(Eigen::seq(3, 5), j) = Eigen::Vector3d::Zero();
-        //         }
-        //         j++;
-        //     }
-        //     else
-        //     {
-        //         _ET_T(et, &ret(0), q[et->jindex]);
-        //         temp = U * ret;
-        //         U = temp;
-        //     }
-        // }
-
-        ET *et;
         Eigen::Matrix<double, 6, Eigen::Dynamic> tJ(6, ets->n);
         double T[16];
         MapMatrix4dc eT(T);
@@ -117,8 +41,7 @@ extern "C"
         Matrix4dc invU;
         Matrix4dc temp;
         Matrix4dc ret;
-        int j = ets->n - 1;
-        double sign = 1.0;
+        int axis, j = ets->n - 1;
 
         if (tool != NULL)
         {
@@ -129,80 +52,49 @@ extern "C"
 
         for (int i = ets->m - 1; i >= 0; i--)
         {
-            et = ets->ets[i];
-
-            if (et->isjoint)
+            axis = ets->axis[i];
+            if (axis >= 0)
             {
 
-                if (et->axis == 0)
-                {
-                    tJ(Eigen::seq(0, 2), j) = U(2, Eigen::seq(0, 2)) * U(1, 3) - U(1, Eigen::seq(0, 2)) * U(2, 3);
-                    tJ(Eigen::seq(3, 5), j) = U(0, Eigen::seq(0, 2));
-
-                    if (et->isflip)
-                    {
-                        tJ(Eigen::seq(0, 5), j) = -tJ(Eigen::seq(0, 5), j);
-                    }
-                }
-                else if (et->axis == 1)
-                {
-                    tJ(Eigen::seq(0, 2), j) = U(0, Eigen::seq(0, 2)) * U(2, 3) - U(2, Eigen::seq(0, 2)) * U(0, 3);
-                    tJ(Eigen::seq(3, 5), j) = U(1, Eigen::seq(0, 2));
-
-                    if (et->isflip)
-                    {
-                        tJ(Eigen::seq(0, 5), j) = -tJ(Eigen::seq(0, 5), j);
-                    }
-                }
-                else if (et->axis == 2)
-                {
-                    tJ(Eigen::seq(0, 2), j) = U(1, Eigen::seq(0, 2)) * U(0, 3) - U(0, Eigen::seq(0, 2)) * U(1, 3);
-                    tJ(Eigen::seq(3, 5), j) = U(2, Eigen::seq(0, 2));
-
-                    if (et->isflip)
-                    {
-                        tJ(Eigen::seq(0, 5), j) = -tJ(Eigen::seq(0, 5), j);
-                    }
-                }
-                else if (et->axis == 3)
+                if (axis == 0)
                 {
                     tJ(Eigen::seq(0, 2), j) = U(0, Eigen::seq(0, 2));
                     tJ(Eigen::seq(3, 5), j) = Eigen::Vector3d::Zero();
-
-                    if (et->isflip)
-                    {
-                        tJ(Eigen::seq(0, 2), j) = -tJ(Eigen::seq(0, 5), j);
-                    }
                 }
-                else if (et->axis == 4)
+                else if (axis == 1)
                 {
                     tJ(Eigen::seq(0, 2), j) = U(1, Eigen::seq(0, 2));
                     tJ(Eigen::seq(3, 5), j) = Eigen::Vector3d::Zero();
-
-                    if (et->isflip)
-                    {
-                        tJ(Eigen::seq(0, 2), j) = -tJ(Eigen::seq(0, 5), j);
-                    }
                 }
-                else if (et->axis == 5)
+                else if (axis == 2)
                 {
                     tJ(Eigen::seq(0, 2), j) = U(2, Eigen::seq(0, 2));
                     tJ(Eigen::seq(3, 5), j) = Eigen::Vector3d::Zero();
-
-                    if (et->isflip)
-                    {
-                        tJ(Eigen::seq(0, 2), j) = -tJ(Eigen::seq(0, 5), j);
-                    }
+                }
+                else if (axis == 3)
+                {
+                    tJ(Eigen::seq(0, 2), j) = U(2, Eigen::seq(0, 2)) * U(1, 3) - U(1, Eigen::seq(0, 2)) * U(2, 3);
+                    tJ(Eigen::seq(3, 5), j) = U(0, Eigen::seq(0, 2));
+                }
+                else if (axis == 4)
+                {
+                    tJ(Eigen::seq(0, 2), j) = U(0, Eigen::seq(0, 2)) * U(2, 3) - U(2, Eigen::seq(0, 2)) * U(0, 3);
+                    tJ(Eigen::seq(3, 5), j) = U(1, Eigen::seq(0, 2));
+                }
+                else if (axis == 5)
+                {
+                    tJ(Eigen::seq(0, 2), j) = U(1, Eigen::seq(0, 2)) * U(0, 3) - U(0, Eigen::seq(0, 2)) * U(1, 3);
+                    tJ(Eigen::seq(3, 5), j) = U(2, Eigen::seq(0, 2));
                 }
 
-                _ET_T(et, &ret(0), q[et->jindex]);
+                _ET_T(ets, q, i, &ret(0));
                 temp = ret * U;
                 U = temp;
                 j--;
             }
             else
             {
-                _ET_T(et, &ret(0), q[et->jindex]);
+                _copy(ets->origin + 16*i, &ret(0));
                 temp = ret * U;
                 U = temp;
             }
@@ -218,14 +110,13 @@ extern "C"
 
     void _ETS_jacobe(ETS *ets, double *q, double *tool, MapMatrixJc &eJ)
     {
-        ET *et;
         double T[16];
         MapMatrix4dc eT(T);
         Matrix4dc U = Eigen::Matrix4d::Identity();
         Matrix4dc invU;
         Matrix4dc temp;
         Matrix4dc ret;
-        int j = ets->n - 1;
+        int axis, j = ets->n - 1;
 
         if (tool != NULL)
         {
@@ -236,79 +127,48 @@ extern "C"
 
         for (int i = ets->m - 1; i >= 0; i--)
         {
-            et = ets->ets[i];
-
-            if (et->isjoint)
+            axis = ets->axis[i];
+            if (axis >= 0)
             {
-                if (et->axis == 0)
-                {
-                    eJ(Eigen::seq(0, 2), j) = U(2, Eigen::seq(0, 2)) * U(1, 3) - U(1, Eigen::seq(0, 2)) * U(2, 3);
-                    eJ(Eigen::seq(3, 5), j) = U(0, Eigen::seq(0, 2));
-
-                    if (et->isflip)
-                    {
-                        eJ(Eigen::seq(0, 5), j) = -eJ(Eigen::seq(0, 5), j);
-                    }
-                }
-                else if (et->axis == 1)
-                {
-                    eJ(Eigen::seq(0, 2), j) = U(0, Eigen::seq(0, 2)) * U(2, 3) - U(2, Eigen::seq(0, 2)) * U(0, 3);
-                    eJ(Eigen::seq(3, 5), j) = U(1, Eigen::seq(0, 2));
-
-                    if (et->isflip)
-                    {
-                        eJ(Eigen::seq(0, 5), j) = -eJ(Eigen::seq(0, 5), j);
-                    }
-                }
-                else if (et->axis == 2)
-                {
-                    eJ(Eigen::seq(0, 2), j) = U(1, Eigen::seq(0, 2)) * U(0, 3) - U(0, Eigen::seq(0, 2)) * U(1, 3);
-                    eJ(Eigen::seq(3, 5), j) = U(2, Eigen::seq(0, 2));
-
-                    if (et->isflip)
-                    {
-                        eJ(Eigen::seq(0, 5), j) = -eJ(Eigen::seq(0, 5), j);
-                    }
-                }
-                else if (et->axis == 3)
+                if (axis == 0)
                 {
                     eJ(Eigen::seq(0, 2), j) = U(0, Eigen::seq(0, 2));
                     eJ(Eigen::seq(3, 5), j) = Eigen::Vector3d::Zero();
-
-                    if (et->isflip)
-                    {
-                        eJ(Eigen::seq(0, 2), j) = -eJ(Eigen::seq(0, 5), j);
-                    }
                 }
-                else if (et->axis == 4)
+                else if (axis == 1)
                 {
                     eJ(Eigen::seq(0, 2), j) = U(1, Eigen::seq(0, 2));
                     eJ(Eigen::seq(3, 5), j) = Eigen::Vector3d::Zero();
-
-                    if (et->isflip)
-                    {
-                        eJ(Eigen::seq(0, 2), j) = -eJ(Eigen::seq(0, 5), j);
-                    }
                 }
-                else if (et->axis == 5)
+                else if (axis == 2)
                 {
                     eJ(Eigen::seq(0, 2), j) = U(2, Eigen::seq(0, 2));
                     eJ(Eigen::seq(3, 5), j) = Eigen::Vector3d::Zero();
-
-                    if (et->isflip)
-                    {
-                        eJ(Eigen::seq(0, 2), j) = -eJ(Eigen::seq(0, 5), j);
-                    }
+                }
+                else if (axis == 3)
+                {
+                    eJ(Eigen::seq(0, 2), j) = U(2, Eigen::seq(0, 2)) * U(1, 3) - U(1, Eigen::seq(0, 2)) * U(2, 3);
+                    eJ(Eigen::seq(3, 5), j) = U(0, Eigen::seq(0, 2));
+                }
+                else if (axis == 4)
+                {
+                    eJ(Eigen::seq(0, 2), j) = U(0, Eigen::seq(0, 2)) * U(2, 3) - U(2, Eigen::seq(0, 2)) * U(0, 3);
+                    eJ(Eigen::seq(3, 5), j) = U(1, Eigen::seq(0, 2));
+                }
+                else if (axis == 5)
+                {
+                    eJ(Eigen::seq(0, 2), j) = U(1, Eigen::seq(0, 2)) * U(0, 3) - U(0, Eigen::seq(0, 2)) * U(1, 3);
+                    eJ(Eigen::seq(3, 5), j) = U(2, Eigen::seq(0, 2));
                 }
 
-                _ET_T(et, &ret(0), q[et->jindex]);
+                _ET_T(ets, q, i, &ret(0));
                 temp = ret * U;
                 U = temp;
                 j--;
             }
             else
             {
-                _ET_T(et, &ret(0), q[et->jindex]);
+                _copy(ets->origin + 16*i, &ret(0));
                 temp = ret * U;
                 U = temp;
             }
@@ -317,7 +177,6 @@ extern "C"
 
     void _ETS_fkine(ETS *ets, double *q, double *base, double *tool, MapMatrix4dc &e_ret)
     {
-        ET *et;
         Matrix4dc temp;
         Matrix4dc current;
 
@@ -333,9 +192,7 @@ extern "C"
 
         for (int i = 0; i < ets->m; i++)
         {
-            et = ets->ets[i];
-
-            _ET_T(et, &e_ret(0), q[et->jindex]);
+            _ET_T(ets, q, i, &e_ret(0));
             temp = current * e_ret;
             current = temp;
         }
@@ -351,22 +208,93 @@ extern "C"
         }
     }
 
-    void _ET_T(ET *et, double *ret, double eta)
+    void _ET_T(ETS *ets, double *q, int link_index, double *ret)
     {
-        // Check if static and return static transform
-        if (!et->isjoint)
+        double eta, *origin = ets->origin + link_index * 16;
+
+        // Check if and return transform
+        if (ets->axis[link_index] < 0)
         {
-            _copy(et->T, ret);
+            _copy(origin, ret);
             return;
         }
-
-        if (et->isflip)
-        {
-            eta = -eta;
-        }
+        eta = q[ets->jindex[link_index]];
 
         // Calculate ET trasform based on eta
-        et->op(ret, eta);
+        switch (ets->axis[link_index])
+        {
+            case 0:
+                _ET_T_tx(origin, eta, ret);
+                break;
+            case 1:
+                _ET_T_ty(origin, eta, ret);
+                break;
+            case 2:
+                _ET_T_tz(origin, eta, ret);
+                break;
+            case 3:
+                _ET_T_rx(origin, eta, ret);
+                break;
+            case 4:
+                _ET_T_ry(origin, eta, ret);
+                break;
+            case 5:
+                _ET_T_rz(origin, eta, ret);
+                break;
+            default:
+                break;
+        }
+    }
+
+    void _ET_T_tx(double *origin, double eta, double *ret)
+    {
+        Matrix4dc T = Matrix4dc::Identity();
+        T(0, 3) = eta;
+        _mult4(origin, &T(0), ret);
+    }
+
+    void _ET_T_ty(double *origin, double eta, double *ret)
+    {
+        Matrix4dc T = Matrix4dc::Identity();
+        T(1, 3) = eta;
+        _mult4(origin, &T(0), ret);
+    }
+
+    void _ET_T_tz(double *origin, double eta, double *ret)
+    {
+        Matrix4dc T = Matrix4dc::Identity();
+        T(2, 3) = eta;
+        _mult4(origin, &T(0), ret);
+    }
+
+    void _ET_T_rx(double *origin, double eta, double *ret)
+    {
+        Matrix4dc T = Matrix4dc::Identity();
+        T(1, 1) = cos(eta);
+        T(2, 1) = sin(eta);
+        T(1, 2) = -sin(eta);
+        T(2, 2) = cos(eta);
+        _mult4(origin, &T(0), ret);
+    }
+
+    void _ET_T_ry(double *origin, double eta, double *ret)
+    {
+        Matrix4dc T = Matrix4dc::Identity();
+        T(0, 0) = cos(eta);
+        T(2, 0) = -sin(eta);
+        T(0, 2) = sin(eta);
+        T(2, 2) = cos(eta);
+        _mult4(origin, &T(0), ret);
+    }
+
+    void _ET_T_rz(double *origin, double eta, double *ret)
+    {
+        Matrix4dc T = Matrix4dc::Identity();
+        T(0, 0) = cos(eta);
+        T(0, 1) = -sin(eta);
+        T(1, 0) = sin(eta);
+        T(1, 1) = cos(eta);
+        _mult4(origin, &T(0), ret);
     }
 
 } /* extern "C" */

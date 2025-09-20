@@ -5,6 +5,8 @@ asset
 # package files
 *.egg-info/
 build/
+bin/
+*.so
 
 # cache files
 __pycache__/

@@ -1,16 +1,9 @@
-/**
- * \file methods.h
- * \author Jesse Haviland
- *
- */
-/* methods.h */
-
 #ifndef _METHODS_H_
 #define _METHODS_H_
 
-#include <Python.h>
 #include "structs.h"
 #include "linalg.h"
+#include <Python.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -23,7 +16,14 @@ extern "C"
     void _ETS_jacob0(ETS *ets, double *q, double *tool, MapMatrixJc &eJ);
     void _ETS_jacobe(ETS *ets, double *q, double *tool, MapMatrixJc &eJ);
     void _ETS_fkine(ETS *ets, double *q, double *base, double *tool, MapMatrix4dc &e_ret);
-    void _ET_T(ET *et, double *ret, double eta);
+    void _ET_T(ETS *ets, double *q, int link_index, double *ret);
+    void _ET_T_tx(double *origin, double eta, double *ret);
+    void _ET_T_ty(double *origin, double eta, double *ret);
+    void _ET_T_tz(double *origin, double eta, double *ret);
+    void _ET_T_rx(double *origin, double eta, double *ret);
+    void _ET_T_ry(double *origin, double eta, double *ret);
+    void _ET_T_rz(double *origin, double eta, double *ret);
+
 
 #ifdef __cplusplus
 } /* extern "C" */

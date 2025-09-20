@@ -6,13 +6,11 @@
 #include "structs.h"
 
 #include <Python.h>
+#include <Eigen/Dense>
+
 #include <math.h>
 #include <iostream>
-#include <Eigen/Dense>
-// #include <Eigen/QR>
-// #include <Eigen/Core>
-// #include <Eigen/LU>
-// #include <Eigen/SVD>
+
 
 extern "C"
 {
@@ -80,6 +78,7 @@ extern "C"
             {
                 // Current pose Te
                 _ETS_fkine(ets, q.data(), (double *)NULL, NULL, Te);
+                printf("iter %d, TE = %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f\n", iter, Te(0, 0), Te(0, 1), Te(0, 2), Te(0, 3), Te(1, 0), Te(1, 1), Te(1, 2), Te(1, 3), Te(2, 0), Te(2, 1), Te(2, 2), Te(2, 3), Te(3, 0), Te(3, 1), Te(3, 2), Te(3, 3));
 
                 // Angle axis error e
                 _angle_axis(Te, Tep, e);
@@ -92,9 +91,10 @@ extern "C"
                     // We have arrived
 
                     // wrap q to +- pi
-                    for (int i = 0; i < ets->n; i++)
+                    for (int i = 0; i < ets->m; i++)
                     {
-                        q(i) = std::fmod(q(i) + PI, PI_x2) - PI;
+                        if (ets->axis[i] >=3) // revolute joint
+                            q(ets->jindex[i]) = std::fmod(q(ets->jindex[i]) + PI, PI_x2) - PI;
                     }
 
                     // Check for joint limit violation
@@ -226,9 +226,10 @@ extern "C"
                     // We have arrived
 
                     // wrap q to +- pi
-                    for (int i = 0; i < ets->n; i++)
+                    for (int i = 0; i < ets->m; i++)
                     {
-                        q(i) = std::fmod(q(i) + PI, PI_x2) - PI;
+                        if (ets->axis[i] >=3) // revolute joint
+                            q(ets->jindex[i]) = std::fmod(q(ets->jindex[i]) + PI, PI_x2) - PI;
                     }
 
                     // Check for joint limit violation
@@ -352,9 +353,10 @@ extern "C"
                     // We have arrived
 
                     // wrap q to +- pi
-                    for (int i = 0; i < ets->n; i++)
+                    for (int i = 0; i < ets->m; i++)
                     {
-                        q(i) = std::fmod(q(i) + PI, PI_x2) - PI;
+                        if (ets->axis[i] >=3) // revolute joint
+                            q(ets->jindex[i]) = std::fmod(q(ets->jindex[i]) + PI, PI_x2) - PI;
                     }
 
                     // Check for joint limit violation
@@ -466,9 +468,10 @@ extern "C"
                     // We have arrived
 
                     // wrap q to +- pi
-                    for (int i = 0; i < ets->n; i++)
+                    for (int i = 0; i < ets->m; i++)
                     {
-                        q(i) = std::fmod(q(i) + PI, PI_x2) - PI;
+                        if (ets->axis[i] >=3) // revolute joint
+                            q(ets->jindex[i]) = std::fmod(q(ets->jindex[i]) + PI, PI_x2) - PI;
                     }
 
                     // Check for joint limit violation
@@ -578,9 +581,10 @@ extern "C"
                     // We have arrived
 
                     // wrap q to +- pi
-                    for (int i = 0; i < ets->n; i++)
+                    for (int i = 0; i < ets->m; i++)
                     {
-                        q(i) = std::fmod(q(i) + PI, PI_x2) - PI;
+                        if (ets->axis[i] >=3) // revolute joint
+                            q(ets->jindex[i]) = std::fmod(q(ets->jindex[i]) + PI, PI_x2) - PI;
                     }
 
                     // Check for joint limit violation
@@ -650,10 +654,7 @@ extern "C"
         for (int i = 0; i < ets->n; i++)
         {
             if (q(i) < ets->qlim_l[i] || q(i) > ets->qlim_h[i])
-            {
-                // std::cout << "Joint limit: " << q.transpose() << "  :  " << q(i) << "\n";
                 return 0;
-            }
         }
 
         return 1;

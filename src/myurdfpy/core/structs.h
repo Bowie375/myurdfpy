@@ -19,43 +19,22 @@ extern "C"
 {
 #endif /* __cplusplus */
 
-        typedef struct ET ET;
-        typedef struct ETS ETS;
+    typedef struct ETS ETS;
 
-        struct ETS
-        {
-                /**********************************************************
-                 *************** kinematic parameters *********************
-                 **********************************************************/
-                ET **ets;
-                int n;
-                int m;
+    struct ETS
+    {
+        int n;              // number of joints
+        int m;              // number of links
 
-                // While this information is stored in the ET's
-                // Its much faster for IK to cache it here
-                double *qlim_l;
-                double *qlim_h;
-                double *q_range2;
-        };
+        int *axis;          // joint axis, range [-1, 5], -1: fixed, 0: tx, 1: ty, 2: tz, 3: rx, 4: ry, 5: rz
+        int *jindex;        // joint index, range [0, n-1]
+        double *origin;     // joint origin relative to parent link
+        double *qlim_l;
+        double *qlim_h;
+        double *q_range2;   // (qlim_h - qlim_l)/2
+    };
 
-        struct ET
-        {
-                int isstaticsym; /* this ET is static and has a symbolic value */
-                int isjoint;
-                int isflip;
-                int jindex;
-                int axis;
-                double *T;    /* link static transform */
-                double *qlim; /* joint limits */
-                void (*op)(double *data, double eta);
-
-                // #ifdef __cplusplus
-                // Eigen::Map<Eigen::Matrix<double, 4, 4, Eigen::RowMajor>> Tm;
-                MapMatrix4dc Tm;
-                // #endif /* __cplusplus */
-        };
-
-#ifdef __cplusplus
+    #ifdef __cplusplus
 } /* extern "C" */
 #endif /* __cplusplus */
 

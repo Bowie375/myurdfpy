@@ -1,16 +1,10 @@
-/**
- * \file ik.h
- * \author Jesse Haviland
- *
- */
-/* ik.h */
-
 #ifndef _IK_H_
 #define _IK_H_
 
-#include <Python.h>
 #include "structs.h"
 #include "linalg.h"
+
+#include <Python.h>
 
 #ifdef __cplusplus
 extern "C"

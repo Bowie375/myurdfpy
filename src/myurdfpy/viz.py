@@ -5,7 +5,7 @@ import viser
 import trimesh.transformations as tra
 
 from myurdfpy import URDF
-from myurdfpy.urdf_rtb import URDF as URDF_RTB
+# from myurdfpy.urdf_rtb import URDF as URDF_RTB
 
 _logger = logging.getLogger(__name__)
          

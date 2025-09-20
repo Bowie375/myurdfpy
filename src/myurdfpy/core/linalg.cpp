@@ -44,27 +44,6 @@ extern "C"
         inv[7] = 0;
         inv[11] = 0;
         inv[15] = 1;
-
-        // inv[0] = m[0];
-        // inv[1] = m[4];
-        // inv[2] = m[8];
-
-        // inv[4] = m[1];
-        // inv[5] = m[5];
-        // inv[6] = m[9];
-
-        // inv[8] = m[2];
-        // inv[9] = m[6];
-        // inv[10] = m[10];
-
-        // inv[3] = -(inv[0] * m[3] + inv[1] * m[7] + inv[2] * m[11]);
-        // inv[7] = -(inv[4] * m[3] + inv[5] * m[7] + inv[6] * m[11]);
-        // inv[11] = -(inv[8] * m[3] + inv[9] * m[7] + inv[10] * m[11]);
-
-        // inv[12] = 0;
-        // inv[13] = 0;
-        // inv[14] = 0;
-        // inv[15] = 1;
     }
 
     void _r2q(double *r, double *q)

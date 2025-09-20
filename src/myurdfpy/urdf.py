@@ -3,7 +3,7 @@ import copy
 import logging
 from functools import partial
 from dataclasses import dataclass, field, is_dataclass
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Literal, Tuple
 
 import six
 import numpy as np
@@ -12,6 +12,7 @@ import trimesh.transformations as tra
 from lxml import etree
 
 from myurdfpy.utils import str2float, array_eq, scalar_eq, filename_handler_magic
+from myurdfpy.IK import IK_GN_c, IK_NR_c, IK_LM_c, ETS_init
 
 _logger = logging.getLogger(__name__)
 
@@ -232,12 +233,14 @@ class Link:
     inertial: Optional[Inertial] = None
     visuals: List[Visual] = field(default_factory=list)
     collisions: List[Collision] = field(default_factory=list)
+    joint_name: str = None # the joint between this link and its parent
 
     def __eq__(self, other):
         if not isinstance(other, Link):
             return NotImplementedError
         return (
             self.name == other.name
+            and self.joint_name == other.joint_name
             and self.inertial == other.inertial
             and all(self_visual in other.visuals for self_visual in self.visuals)
             and all(other_visual in self.visuals for other_visual in other.visuals)
@@ -462,17 +465,18 @@ class URDF:
         self._errors = []
 
     def _create_maps(self):
-        self._material_map = {}
+        self._material_map: dict[str, Material] = {}
         for m in self.robot.materials:
             self._material_map[m.name] = m
 
-        self._joint_map = {}
-        for j in self.robot.joints:
-            self._joint_map[j.name] = j
-
-        self._link_map = {}
+        self._link_map: dict[str, Link] = {}
         for link in self.robot.links:
             self._link_map[link.name] = link
+
+        self._joint_map: dict[str, Joint] = {}
+        for j in self.robot.joints:
+            self._joint_map[j.name] = j
+            self._link_map[j.child].joint_name = j.name
 
     def _update_actuated_joints(self):
         self._actuated_joints: list[Joint] = []
@@ -703,10 +707,10 @@ class URDF:
                     cfg = [0.0]
             elif j.type == "continuous":
                 cfg = [0.0]
-            elif j.type == "floating":
-                cfg = [0.0] * 6
             elif j.type == "planar":
                 cfg = [0.0] * 2
+            elif j.type == "floating":
+                cfg = [0.0] * 3
 
             config.append(cfg)
             config_names.append(j.name)
@@ -816,9 +820,7 @@ class URDF:
                     "No scene available. Use build_scene_graph=True during loading."
                 )
             else:
-                return self._scene.graph.get(frame_to=frame_to, frame_from=frame_from)[
-                    0
-                ]
+                return self._scene.graph.get(frame_to=frame_to, frame_from=frame_from)[0]
 
 
     def _successors(self, node):
@@ -1182,6 +1184,211 @@ class URDF:
 
         return matrix, q
 
+    def IK(
+        self, 
+        pose: np.ndarray,
+        end: Union[str, Link],
+        start: Union[str, Link, None] = None,
+        q0: Union[np.ndarray, None] = None,
+        delta_thresh: float = None,
+        max_iter: int = 10,
+        max_search: int = 2,
+        tol: float = 1e-6,
+        mask: Union[np.ndarray, None] = None,
+        joint_limits: bool = True,
+        name: Literal["GN", "LM", "NR"] = "LM",
+        pinv: bool = True,
+        pinv_damping: float = 0.01,
+        k: float = 1.0,
+        method: Literal["chan", "wampler", "sugihara"] = "chan",
+    ) -> Tuple[np.ndarray, int, int, int, float]:
+        """Compute the inverse kinematics for a given frame_to and target position.
+
+        Args:
+        -----
+            pose (np.ndarray) 
+                The desired pose for the designated end link.
+            end (union[str, Link])
+                the link considered as the end-effector
+            **start (union[str, Link, None])
+                the link considered as the base frame, defaults to the robots's base frame
+            **q0 (np.ndarray)
+                The initial joint coordinate vector. Provide the cfg for all joints or only
+                provide joint values from start to end, an error will be raised otherwise.
+            **delta_thresh (float)
+                Threshold for joint position change when q0 is provided.
+                This is used to constrain the solution to be close to the initial qpos.
+            **max_iter (int)
+                How many iterations are allowed within a search before a new search
+            **max_search (int)
+                How many searches are allowed before being deemed unsuccessfull
+            **tol (float)
+                Maximum allowed residual error E
+            **mask (np.ndarray)
+                A 6D vector which assigns weights to Cartesian degrees-of-freedom
+                error priority
+            **joint_limits (bool)
+                Reject solutions with joint limit violations
+            **name (literal["GN", "LM", "NR"]):
+                Name of the numerical IK method to use. Defaults to "LM"
+            **pinv (bool)
+                Used in "GN" and "NR". Use the psuedo-inverse instad of the normal matrix inverse.
+                This arg must be set to True for redundant robots (>6 DoF).
+            **pinv_damping (float)
+                Used in "GN" and "NR". Damping factor for the psuedo-inverse
+            **k (float)
+                Used only in "LM". Sets the gain value for the damping matrix Wn in the next iteration.
+            **method: literal["chan", "wampler", "sugihara"]
+                Used only in "LM". One of "chan", "sugihara" or "wampler". Defines which method is used
+                to calculate the damping matrix Wn in the ``step`` method. Default to "chan"
+        
+        Returns
+        -------
+            sol
+                tuple (q, success, iterations, searches, residual)
+
+            The return value ``sol`` is a tuple with elements:
+
+            ============    ==========  ===============================================
+            Element         Type        Description
+            ============    ==========  ===============================================
+            ``q``           ndarray(n)  joint coordinates in units of radians or metres
+            ``success``     int         whether a solution was found
+            ``iterations``  int         total number of iterations
+            ``searches``    int         total number of searches
+            ``residual``    float       final value of cost function
+            ============    ==========  ===============================================
+
+            If ``success == 0`` the ``q`` values will be valid numbers, but the
+            solution will be in error.  The amount of error is indicated by
+            the ``residual``.
+        """
+
+        # First: build ETS
+        start = self.base_link if start is None else start
+        start_link = self.link_map[start] if isinstance(start, str) else start
+        end_link = self.link_map[end] if isinstance(end, str) else end
+
+        ### Get Link Chain
+        middle_links = [end_link]
+        while end_link.joint_name is not None:
+            parent_link = self._link_map[self._joint_map[end_link.joint_name].parent]
+            if parent_link.name == start_link.name:
+                break
+            middle_links.append(parent_link)
+            end_link = parent_link
+        if end_link.joint_name is None:
+            raise ValueError("End link is not a child of start link")
+        middle_links = middle_links[::-1]
+
+        ets, q0 = self._build_ETS(link_chain = middle_links, q0=q0)
+
+        # Second: setup IK function and kwargss
+        if name == "GN":
+            func = IK_GN_c
+            kwargs = dict(pinv=pinv, pinv_damping=pinv_damping)
+        elif name == "LM":
+            func = IK_LM_c
+            kwargs = dict(k=k, method=method)
+        elif name == "NR":
+            func = IK_NR_c
+            kwargs = dict(pinv=pinv, pinv_damping=pinv_damping)
+        else:
+            raise ValueError(f"Invalid IK name {name}")
+
+        # Third: run IK loop
+        s = max_search
+        sol = None
+
+        while s > 0:
+            q, success, iterations, searches, residual = func(
+                ets,
+                pose, 
+                q0, 
+                max_iter,
+                s, 
+                tol, 
+                joint_limits,
+                mask, 
+                *kwargs.values(),
+            )
+            
+            s -= searches
+            sol = (q, success, iterations, searches, residual) if sol is None or residual < sol[4] else sol
+
+            if success:
+                if q0 is not None and delta_thresh is not None and np.linalg.norm(q - q0) > delta_thresh:
+                    continue
+
+                return q, success, iterations, searches, residual
+
+        return (sol[0], 0, sol[2], sol[3], sol[4]) # IK failed, return best solution
+
+    def _build_ETS(self, link_chain: List[Link], q0: Union[np.ndarray, None] = None):
+        """Build an ETS model from start_link to end_link."""
+
+        n = 0
+        m = len(link_chain)
+        axis = []
+        origin = []
+        qlim_l = []
+        qlim_h = []
+        for link in link_chain:
+            joint = self._joint_map[link.joint_name]
+            ax = [0,1,2][np.argmax(np.abs(joint.axis))]
+            if joint.type == "prismatic":
+                n += 1
+                ax = [ax]
+                orig = [joint.origin]
+                lim_l = [joint.limit.lower]
+                lim_h = [joint.limit.upper]
+            elif joint.type == "revolute" or joint.type == "continuous":
+                n += 1
+                ax = [3 + ax]
+                orig = [joint.origin]
+                lim_l = [joint.limit.lower]
+                lim_h = [joint.limit.upper]  
+            elif joint.type == "planar":
+                n += 2
+                ax = [(ax+1)%3, (ax+2)%3]
+                orig = [joint.origin, np.eye(4)]
+                lim_l = [joint.limit.lower if joint.limit.lower is not None else -np.inf] * 2
+                lim_h = [joint.limit.upper if joint.limit.upper is not None else np.inf] * 2
+            elif joint.type == "floating":
+                n += 3
+                ax = [0, 1, 2]
+                orig = [joint.origin] + [np.eye(4)] * 2
+                lim_l = [joint.limit.lower if joint.limit.lower is not None else -np.inf] * 3
+                lim_h = [joint.limit.upper if joint.limit.upper is not None else np.inf] * 3
+            else:
+                ax = [-1]
+                orig = [joint.origin]
+                lim_h = lim_l = []
+
+            axis += ax
+            origin += orig
+            qlim_l += lim_l
+            qlim_h += lim_h
+
+        if q0 is not None:
+            if len(q0) == self.num_dofs:
+                tmp_q = []
+                for link in link_chain:
+                    if self._joint_map[link.joint_name].type == "fixed":
+                        continue
+                    tmp_q += list(q0[self.actuated_dof_indices[self.actuated_joint_names.index(link.joint_name)]])
+                q0 = np.array(tmp_q)
+            elif len(q0) == len(link_chain):
+                q0 = np.array(q0)
+            else:
+                raise ValueError("q0 has wrong dimensionalitys")
+
+        return ETS_init(
+            n, m, 
+            np.array(axis, dtype=np.int32), 
+            np.array(origin, dtype=np.float64).reshape(-1,16), 
+            np.array(qlim_l, dtype=np.float64), 
+            np.array(qlim_h, dtype=np.float64)), q0
 
     ##########################################
     # The following part is for URDF parsing #
@@ -2027,4 +2234,24 @@ class URDF:
             else:
                 self._scene.show(callback=callback)
 
+if __name__ == '__main__':
+    robot = URDF.load(
+        "/mnt/afs/xiaobowen/research/tools/myurdfpy/asset/galbot_one_foxtrot/galbot_one_foxtrot_modified.urdf", 
+        load_meshes=False, load_collision_meshes=False)
+    
+    cfg = {
+        "leg_joint1": 0.25,
+    }
+    T = robot.update_cfg(cfg)
+    p = robot.get_transform("leg_link1")
+    print(robot.cfg)
+    print(p) 
 
+    q0 = robot.zero_cfg
+    q0[robot.actuated_joint_names.index("leg_joint1")] = 0.25
+    #q0[robot.actuated_joint_names.index("leg_joint2")] = 0.25
+    #q0[robot.actuated_joint_names.index("leg_joint3")] = 0.6
+    #q0[robot.actuated_joint_names.index("leg_joint4")] = 0.6
+
+    sol = robot.IK(p, end="leg_link1", q0=q0, name="GN")
+    print(sol)
