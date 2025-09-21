@@ -41,7 +41,7 @@ Maintaining two backends is a compromise between speed, extensibility, and robus
 - Performance
     - `urdf.py` is generally faster for URDF parsing and forward kinematics.
     - `urdf_rtb.py` tends to be faster for inverse kinematics.
-    - Detailed benchmarks are provided in [this section](#comparison-of-speed-between-urdfpy-and-urdf_rbtpy).
+    - Detailed benchmarks are provided in [this section](#comparison-of-speed-between-urdfpy-and-urdf_rtbpy).
 
 - Community & Robustness
     - urdf_rbt.py benefits from the large user base and active development of Robotics Toolbox for Python. So I think it is more robust than `urdf.py`.
