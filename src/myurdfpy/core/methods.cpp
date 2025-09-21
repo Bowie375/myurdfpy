@@ -250,21 +250,21 @@ extern "C"
     {
         Matrix4dc T = Matrix4dc::Identity();
         T(0, 3) = eta;
-        _mult4(origin, &T(0), ret);
+        _mult4(&T(0), origin, ret);
     }
 
     void _ET_T_ty(double *origin, double eta, double *ret)
     {
         Matrix4dc T = Matrix4dc::Identity();
         T(1, 3) = eta;
-        _mult4(origin, &T(0), ret);
+        _mult4(&T(0), origin, ret);
     }
 
     void _ET_T_tz(double *origin, double eta, double *ret)
     {
         Matrix4dc T = Matrix4dc::Identity();
         T(2, 3) = eta;
-        _mult4(origin, &T(0), ret);
+        _mult4(&T(0), origin, ret);
     }
 
     void _ET_T_rx(double *origin, double eta, double *ret)
@@ -274,7 +274,7 @@ extern "C"
         T(2, 1) = sin(eta);
         T(1, 2) = -sin(eta);
         T(2, 2) = cos(eta);
-        _mult4(origin, &T(0), ret);
+        _mult4(&T(0), origin, ret);
     }
 
     void _ET_T_ry(double *origin, double eta, double *ret)
@@ -284,7 +284,7 @@ extern "C"
         T(2, 0) = -sin(eta);
         T(0, 2) = sin(eta);
         T(2, 2) = cos(eta);
-        _mult4(origin, &T(0), ret);
+        _mult4(&T(0), origin, ret);
     }
 
     void _ET_T_rz(double *origin, double eta, double *ret)
@@ -294,7 +294,7 @@ extern "C"
         T(0, 1) = -sin(eta);
         T(1, 0) = sin(eta);
         T(1, 1) = cos(eta);
-        _mult4(origin, &T(0), ret);
+        _mult4(&T(0), origin, ret);
     }
 
 } /* extern "C" */

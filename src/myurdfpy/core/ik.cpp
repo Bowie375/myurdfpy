@@ -78,7 +78,6 @@ extern "C"
             {
                 // Current pose Te
                 _ETS_fkine(ets, q.data(), (double *)NULL, NULL, Te);
-                printf("iter %d, TE = %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f\n", iter, Te(0, 0), Te(0, 1), Te(0, 2), Te(0, 3), Te(1, 0), Te(1, 1), Te(1, 2), Te(1, 3), Te(2, 0), Te(2, 1), Te(2, 2), Te(2, 3), Te(3, 0), Te(3, 1), Te(3, 2), Te(3, 3));
 
                 // Angle axis error e
                 _angle_axis(Te, Tep, e);

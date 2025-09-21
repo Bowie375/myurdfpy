@@ -1149,7 +1149,7 @@ class URDF:
                     frame_from=j.parent, frame_to=j.child, matrix=matrix
                 )
 
-    def _forward_kinematics_joint(self, joint, q=None):
+    def _forward_kinematics_joint(self, joint: Joint, q: Union[float, list, np.ndarray, None] = None):
         origin = np.eye(4) if joint.origin is None else joint.origin
 
         if joint.mimic is not None:
@@ -1173,11 +1173,25 @@ class URDF:
                         self.actuated_joint_names.index(joint.name)
                     ]
                 ]
+            elif isinstance(q, float):
+                q = [q]
+
+            coord = np.eye(3, dtype=origin.dtype)
 
             if joint.type == "prismatic":
                 matrix = origin @ tra.translation_matrix(q * joint.axis)
+            elif joint.type == "revolute" or joint.type == "continuous":
+                matrix = origin @ tra.rotation_matrix(q[0], joint.axis)
+            elif joint.type == "planar":
+                ax = np.argmax(np.abs(joint.axis))
+                matrix = origin @ tra.translation_matrix(q[0] * coord[(ax+1)%3]) \
+                                @ tra.translation_matrix(q[1] * coord[(ax+2)%3])
+            elif joint.type == "floating":
+                matrix = origin @ tra.translation_matrix(q[0] * coord[0]) \
+                                @ tra.rotation_matrix(q[1], coord[1]) \
+                                @ tra.rotation_matrix(q[2], coord[2])
             else:
-                matrix = origin @ tra.rotation_matrix(float(q), joint.axis)
+                raise ValueError(f"Invalid joint type {joint.type}")
         else:
             # this includes: floating, planar, fixed
             matrix = origin
@@ -1191,12 +1205,12 @@ class URDF:
         start: Union[str, Link, None] = None,
         q0: Union[np.ndarray, None] = None,
         delta_thresh: float = None,
-        max_iter: int = 10,
-        max_search: int = 2,
+        max_iter: int = 30,
+        max_search: int = 100,
         tol: float = 1e-6,
         mask: Union[np.ndarray, None] = None,
         joint_limits: bool = True,
-        name: Literal["GN", "LM", "NR"] = "LM",
+        name: Literal["GN", "LM", "NR"] = "NR",
         pinv: bool = True,
         pinv_damping: float = 0.01,
         k: float = 1.0,
@@ -1230,7 +1244,7 @@ class URDF:
             **joint_limits (bool)
                 Reject solutions with joint limit violations
             **name (literal["GN", "LM", "NR"]):
-                Name of the numerical IK method to use. Defaults to "LM"
+                Name of the numerical IK method to use. Defaults to "NR"
             **pinv (bool)
                 Used in "GN" and "NR". Use the psuedo-inverse instad of the normal matrix inverse.
                 This arg must be set to True for redundant robots (>6 DoF).
@@ -1322,6 +1336,7 @@ class URDF:
 
                 return q, success, iterations, searches, residual
 
+        del ets # free memory
         return (sol[0], 0, sol[2], sol[3], sol[4]) # IK failed, return best solution
 
     def _build_ETS(self, link_chain: List[Link], q0: Union[np.ndarray, None] = None):
@@ -2233,25 +2248,3 @@ class URDF:
                 )
             else:
                 self._scene.show(callback=callback)
-
-if __name__ == '__main__':
-    robot = URDF.load(
-        "/mnt/afs/xiaobowen/research/tools/myurdfpy/asset/galbot_one_foxtrot/galbot_one_foxtrot_modified.urdf", 
-        load_meshes=False, load_collision_meshes=False)
-    
-    cfg = {
-        "leg_joint1": 0.25,
-    }
-    T = robot.update_cfg(cfg)
-    p = robot.get_transform("leg_link1")
-    print(robot.cfg)
-    print(p) 
-
-    q0 = robot.zero_cfg
-    q0[robot.actuated_joint_names.index("leg_joint1")] = 0.25
-    #q0[robot.actuated_joint_names.index("leg_joint2")] = 0.25
-    #q0[robot.actuated_joint_names.index("leg_joint3")] = 0.6
-    #q0[robot.actuated_joint_names.index("leg_joint4")] = 0.6
-
-    sol = robot.IK(p, end="leg_link1", q0=q0, name="GN")
-    print(sol)

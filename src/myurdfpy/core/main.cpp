@@ -492,8 +492,6 @@ extern "C"
                 &method))
             return NULL;
 
-        printf("IK_LM: lambda = %f, method = %s\n", lambda, method);
-
         if (!_check_array_type(py_Tep))
             return NULL;
 
