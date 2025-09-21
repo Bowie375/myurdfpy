@@ -1,30 +1,10 @@
 # myurdfpy
-<span style="display:inline-flex; gap:8px;">
-<a href=https://github.com/petercorke/robotics-toolbox-python style="text-decoration:none;outline:none;display:inline-block;">
-  <div style="padding:2px 0px;">
-    <img src="https://raw.githubusercontent.com/petercorke/robotics-toolbox-python/master/.github/svg/rtb_powered.min.svg" alt="RTB Logo" style="height:20px;">
-  </div>
-</a>
 
-<a href="https://viser.studio" target="_blank" style="text-decoration:none;outline:none;display:inline-block;">
-  <div style="display:inline-flex;padding:0px 0px;font-family:Segoe UI;font-size:11px;font-weight:bold;border-radius:3px;overflow:hidden;box-shadow:0 1px px rgba(156, 153, 153, 0.2);">
-    <div style="background-color:#575755;color:#eee;;padding:1px 8px;">powered by</div>
-    <div style="background-color:#FF7F27;color:black;font-weight:normal;padding:1px 8px;display:flex;align-items:center;gap:6px;">
-      Viser
-      <img src="https://viser.studio/main/_static/logo.svg" alt="Viser Logo" style="height:16px;">
-    </div>
-  </div>
-</a>
+[![Powered by the Robotics Toolbox](https://raw.githubusercontent.com/petercorke/robotics-toolbox-python/master/.github/svg/rtb_powered.min.svg)](https://github.com/petercorke/robotics-toolbox-python)
+[![Static Badge](https://img.shields.io/badge/powered_by-Viser-orange?style=flat)](https://viser.studio)
+[![Static Badge](https://img.shields.io/badge/powered_by-yourdfpy-blue?style=flat)](https://github.com/clemense/yourdfpy)
 
-<a href="https://github.com/clemense/yourdfpy" target="_blank" style="text-decoration:none;outline:none;display:inline-block;">
-  <div style="display:inline-flex;padding:0px 0px;font-family:Segoe UI;font-size:11px;font-weight:bold;border-radius:3px;overflow:hidden;box-shadow:0 1px px rgba(156, 153, 153, 0.2);">
-    <div style="background-color:#575755;color:#eee;;padding:1px 8px;">powered by</div>
-    <div style="background-color:#3AECFF;color:black;font-weight:normal;padding:1px 8px;display:flex;align-items:center;gap:6px;">
-      yourdf
-    </div>
-  </div>
-</a>
-</span>
+
 
 ## Introduction
 This is a Python library for parsing URDF (Unified Robot Description Format) files. It provides two interchangeable implementations:
