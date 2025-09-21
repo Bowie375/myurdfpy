@@ -1295,7 +1295,7 @@ class URDF:
             raise ValueError("End link is not a child of start link")
         middle_links = middle_links[::-1]
 
-        ets, q0 = self._build_ETS(link_chain = middle_links, q0=q0)
+        ets, q0, dof_idx = self._build_ETS(link_chain = middle_links, q0=q0)
 
         # Second: setup IK function and kwargss
         if name == "GN":
@@ -1334,10 +1334,14 @@ class URDF:
                 if q0 is not None and delta_thresh is not None and np.linalg.norm(q - q0) > delta_thresh:
                     continue
 
-                return q, success, iterations, searches, residual
+                q_all = self.cfg.copy()
+                q_all[dof_idx] = q
+                return q_all, success, iterations, searches, residual
 
         del ets # free memory
-        return (sol[0], 0, sol[2], sol[3], sol[4]) # IK failed, return best solution
+        q_all = self.cfg.copy()
+        q_all[dof_idx] = sol[0]
+        return (q_all, 0, sol[2], sol[3], sol[4]) # IK failed, return best solution
 
     def _build_ETS(self, link_chain: List[Link], q0: Union[np.ndarray, None] = None):
         """Build an ETS model from start_link to end_link."""
@@ -1385,25 +1389,42 @@ class URDF:
             qlim_l += lim_l
             qlim_h += lim_h
 
+        dof_idx = []
         if q0 is not None:
             if len(q0) == self.num_dofs:
                 tmp_q = []
                 for link in link_chain:
                     if self._joint_map[link.joint_name].type == "fixed":
                         continue
-                    tmp_q += list(q0[self.actuated_dof_indices[self.actuated_joint_names.index(link.joint_name)]])
+                    idx = self.actuated_dof_indices[self.actuated_joint_names.index(link.joint_name)]
+                    dof_idx += idx
+                    tmp_q += list(q0[idx])
                 q0 = np.array(tmp_q)
             elif len(q0) == len(link_chain):
-                q0 = np.array(q0)
+                tmp_q = []
+                for i, link in enumerate(link_chain):
+                    if self._joint_map[link.joint_name].type == "fixed":
+                        continue
+                    idx = self.actuated_dof_indices[self.actuated_joint_names.index(link.joint_name)]
+                    dof_idx += idx
+                    tmp_q += [q0[i]] * len(idx)
+                q0 = np.array(tmp_q)
             else:
                 raise ValueError("q0 has wrong dimensionalitys")
+        else:
+            for i, link in enumerate(link_chain):
+                if self._joint_map[link.joint_name].type == "fixed":
+                    continue
+                idx = self.actuated_dof_indices[self.actuated_joint_names.index(link.joint_name)]
+                dof_idx += idx
 
         return ETS_init(
             n, m, 
             np.array(axis, dtype=np.int32), 
             np.array(origin, dtype=np.float64).reshape(-1,16), 
             np.array(qlim_l, dtype=np.float64), 
-            np.array(qlim_h, dtype=np.float64)), q0
+            np.array(qlim_h, dtype=np.float64)), q0, dof_idx
+
 
     ##########################################
     # The following part is for URDF parsing #

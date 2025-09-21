@@ -784,13 +784,16 @@ class URDF:
                 raise ValueError("End link is not a child of start link")
         middle_links = [j for j in middle_links if j.isjoint][::-1]
 
+        dof_idx = []
         if q0 is not None:
             if len(q0) == self.num_dofs:
                 tmp_q = []
                 for joint in middle_links:
-                    tmp_q.append(q0[joint.jindex]) 
+                    tmp_q.append(q0[joint.jindex])
+                    dof_idx.append(joint.jindex)
                 q0 = np.array(tmp_q)
             elif len(q0) == len(middle_links):
+                dof_idx = [j.jindex for j in middle_links]
                 q0 = np.array(q0)
             else:
                 raise ValueError("q0 has wrong dimensionalitys")
@@ -833,9 +836,14 @@ class URDF:
                 if q0 is not None and delta_thresh is not None and np.linalg.norm(q - q0) > delta_thresh:
                     continue
 
-                return q, success, iterations, searches, residual
+                q_all = self.robot.q.copy()
+                q_all[dof_idx] = q
+                return q_all, success, iterations, searches, residual
 
-        return (sol[0], 0, sol[2], sol[3], sol[4]) # IK failed, return best solution
+        q_all = self.robot.q.copy()
+        q_all[dof_idx] = sol[0]
+        return q_all, 0, sol[2], sol[3], sol[4] # IK failed, return best solution
+
 
     ###########################################
     # The following part is for XML exporting #
