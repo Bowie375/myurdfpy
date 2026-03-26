@@ -1,0 +1,43 @@
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: false
+  job_logging:
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        level: INFO
+        stream: ext://sys.stdout
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        level: INFO
+        filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log
+      file_debug:
+        class: logging.FileHandler
+        formatter: simple
+        level: DEBUG
+        filename: ${hydra.runtime.output_dir}/${hydra.job.name}_debug.log
+    root:
+      level: INFO
+      handlers:
+      - console
+      - file
+      - file_debug
+
+disable_loggers: []
+
+hf:
+  repo_id: RoboVerseOrg/roboverse_data
+  repo_type: dataset
+  revision: main
+  token_env: HF_TOKEN
+
+download:
+  local_dir: data/roboverse_data
+  local_dir_use_symlinks: false
+  include_patterns:
+    - robots/franka/urdf/**
+  ignore_patterns: null

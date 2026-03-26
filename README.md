@@ -32,7 +32,7 @@ Maintaining two backends is a compromise between speed, extensibility, and robus
 See the [Features](#features) section for a morea comparison and demo examples.
 
 ## Installation
-You can install by running the following command:
+Install the project in editable mode:
 
 ```
 git clone https://github.com/Bowie375/myurdfpy.git
@@ -42,13 +42,50 @@ cd ./myurdfpy
 pip install -e .
 ```
 
+The default install now includes:
+- `urdf.py` backend
+- visualization support (`viser` + `hydra-core`)
+
+To enable the Robotics Toolbox backend (`urdf_rtb.py`), install the extra dependencies:
+
+```
+pip install -e .[rtb]
+```
+
 See [Common Issues](#common-issues) for troubleshooting.
+
+## Download URDF Assets
+You can download URDF assets from the Hugging Face RoboVerse dataset with Hydra-based CLI overrides:
+
+```
+python run/download_hf_models.py
+```
+
+The default config downloads only Franka-related URDF files:
+- repo: `RoboVerseOrg/roboverse_data` (dataset repo)
+- include pattern: `robots/franka/urdf/**`
+- local output: `data/roboverse_data` (ignored by git)
+
+Useful overrides:
+
+```
+# Change output directory
+python run/download_hf_models.py download.local_dir=./asset/roboverse_franka
+
+# Download a different robot subset
+python run/download_hf_models.py download.include_patterns=[robots/ur5/urdf/**]
+
+# Download multiple subsets
+python run/download_hf_models.py "download.include_patterns=[robots/franka/urdf/**,robots/ur5/urdf/**]"
+```
+
+If you need authenticated access, export `HF_TOKEN` first.
 
 ## Visualization
 I provided a web-based visualization tool for URDF files. It is based [Viser](https://viser.studio) to help work around ssh conections. You can launch it with the following command::
 
 ```
-python run/visualize_urdf.py urdf.yrdf_file=/path/to/your/urdf/file
+python run/visualize_urdf.py urdf.urdf_file=/path/to/your/urdf/file
 ```
 
 ## Features

@@ -1,6 +1,7 @@
 # data
 asset/
 asset
+data/roboverse_data/
 
 # package files
 *.egg-info/

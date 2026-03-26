@@ -14,15 +14,28 @@ license = { text = "MIT" }
 requires-python = ">=3.8"
 
 dependencies = [
-    "trimesh",
-    "viser",
     "numpy",
-    "scipy",
-    "sympy",
-    "pybullet",
-    "hydra-core",
+    "six",
+    "lxml",
+    "trimesh",
+    "omegaconf",
     "pydantic",
+    "viser",
+    "hydra-core",
+    "huggingface_hub",
+]
+
+[project.optional-dependencies]
+# Robotics-Toolbox backend (`src/myurdfpy/urdf_rtb.py`)
+rtb = [
     "roboticstoolbox-python",
+    "spatialgeometry",
+]
+
+# Convenience meta-extra
+all = [
+    "roboticstoolbox-python",
+    "spatialgeometry",
 ]
 
 [tool.setuptools.packages.find]
